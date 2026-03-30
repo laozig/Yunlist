@@ -1,0 +1,25 @@
+{
+  "name": "yunlist",
+  "version": "0.1.0",
+  "description": "Lightweight personal network drive",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@fastify/jwt": "^9.0.0",
+    "@fastify/multipart": "^9.4.0",
+    "@fastify/static": "^8.0.0",
+    "dotenv": "^16.4.0",
+    "fastify": "^5.0.0",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^6.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
