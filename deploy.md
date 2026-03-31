@@ -248,6 +248,20 @@ chmod +x deploy.sh
 7. 使用 PM2 启动或重载 `yunlist`
 8. 如果 `.env` 中已配置 `CADDY_EMAIL` / `CADDY_DOMAIN`，自动尝试安装并配置宿主机版 Caddy
 
+如果服务器上已经有 systemd 管理的 `caddy.service`，脚本会直接：
+
+- 写入 `/etc/caddy/Caddyfile`
+- `systemctl enable caddy`
+- `systemctl restart/reload caddy`
+
+如果服务器上**没有** `caddy.service`，脚本会退回到：
+
+- 校验 `/etc/caddy/Caddyfile`
+- 尝试执行 `caddy reload --config /etc/caddy/Caddyfile`
+- 如果尚未运行，则执行 `caddy start --config /etc/caddy/Caddyfile`
+
+也就是说：**现在不再强依赖 `systemctl reload caddy` 成功，非 systemd 环境也能直接启动 Caddy。**
+
 常用 PM2 命令：
 
 ```bash
@@ -541,7 +555,24 @@ CADDY_DOMAIN=...
 脚本会自动：
 - 检测并安装 Caddy（支持的系统）
 - 生成 `/etc/caddy/Caddyfile`
-- 尝试 `systemctl enable/start/reload caddy`
+- 如果检测到 `caddy.service`，则尝试 `systemctl enable/start/reload caddy`
+- 如果没检测到 `caddy.service`，则退回执行 `caddy reload` 或 `caddy start`
+
+如果你看到 Cloudflare **521 Web server is down**，通常说明：
+
+- 宿主机的 Caddy 没有真正监听 80/443
+- 或者服务器防火墙 / 云安全组没有放行 80/443
+
+这时优先检查：
+
+```bash
+pm2 status
+pm2 logs yunlist --lines 50
+caddy version
+ss -lntp | grep -E ':80|:443|:3000'
+```
+
+如果 `3000` 在监听，但 `80/443` 没有监听，说明问题就在 Caddy 没启动或没绑定成功。
 
 ---
 

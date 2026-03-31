@@ -152,16 +152,24 @@ configure_native_caddy() {
   run_as_root cp "$rendered_file" /etc/caddy/Caddyfile
   rm -f "$rendered_file"
 
-  if command -v systemctl >/dev/null 2>&1; then
+  run_as_root caddy validate --config /etc/caddy/Caddyfile
+
+  if command -v systemctl >/dev/null 2>&1 && run_as_root systemctl list-unit-files 2>/dev/null | grep -q '^caddy\.service'; then
     run_as_root systemctl enable caddy >/dev/null 2>&1 || true
     if run_as_root systemctl is-active caddy >/dev/null 2>&1; then
       run_as_root systemctl reload caddy || run_as_root systemctl restart caddy
     else
       run_as_root systemctl restart caddy || run_as_root systemctl start caddy
     fi
-    log "Caddy 已配置并尝试启动/重载"
+    log "Caddy 已通过 systemd 配置并尝试启动/重载"
   else
-    log "未检测到 systemctl，请手动执行：caddy run --config /etc/caddy/Caddyfile"
+    log "未检测到 systemd 管理的 caddy.service，尝试使用 caddy 命令直接启动/重载"
+    if run_as_root caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
+      log "Caddy 已通过 caddy reload 重载配置"
+    else
+      run_as_root caddy start --config /etc/caddy/Caddyfile
+      log "Caddy 已通过 caddy start 在后台启动"
+    fi
   fi
 }
 
@@ -216,7 +224,7 @@ print_summary() {
 如需配合 Caddy 原生部署：
   1. 在 .env 中配置 CADDY_EMAIL / CADDY_DOMAIN
   2. 重新执行 ./deploy.sh，脚本会自动尝试安装并配置 Caddy
-  3. 若你的系统没有 systemd，请手动执行：caddy run --config /etc/caddy/Caddyfile
+  3. 若系统存在 caddy.service，则脚本会走 systemd；否则会自动尝试 `caddy start`
 
 EOF
 }
