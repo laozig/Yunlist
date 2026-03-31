@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent } from 'react';
 import { File, Folder, MoreHorizontal, UploadCloud, FolderPlus, Trash2, Search, Download, Copy } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
@@ -131,7 +131,7 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
     }
   };
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files ? Array.from(e.target.files) : [];
     try {
       await uploadFiles(fileList);
@@ -140,7 +140,7 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
     }
   };
 
-  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     if (!e.dataTransfer.types.includes('Files')) return;
@@ -148,14 +148,14 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
     setIsDragActive(true);
   };
 
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     if (!e.dataTransfer.types.includes('Files')) return;
     e.dataTransfer.dropEffect = 'copy';
   };
 
-  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     dragCounterRef.current = Math.max(dragCounterRef.current - 1, 0);
@@ -164,7 +164,7 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
     }
   };
 
-  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = async (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     dragCounterRef.current = 0;
@@ -190,7 +190,7 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent, file: FileItem) => {
+  const handleDelete = async (e: MouseEvent, file: FileItem) => {
     e.stopPropagation();
     if (!confirm(`确定要删除 ${file.name} 吗？${file.isDirectory ? '文件夹及其内部所有内容将被永久删除。' : ''}`)) return;
     try {

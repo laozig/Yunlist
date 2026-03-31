@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { FileList, type FileItem } from './components/FileList';
 import { FileDetailPanel } from './components/FileDetailPanel';
@@ -51,7 +51,7 @@ function App() {
     }
   }, [token, currentPath, activeView]);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
     setLoginError('');
     try {

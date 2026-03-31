@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { api } from '../lib/api';
 import { ShieldCheck, Eye, EyeOff, Save } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -12,7 +12,7 @@ export function SecurityView() {
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
 
-  const handleUpdate = async (e: React.FormEvent) => {
+  const handleUpdate = async (e: FormEvent) => {
     e.preventDefault();
     if (newPassword !== confirmPassword) {
       return setMessage({ type: 'error', text: '新密码与确认密码不一致' });

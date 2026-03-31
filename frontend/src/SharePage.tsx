@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -289,7 +289,7 @@ export function SharePage() {
                <Home className="w-4 h-4" /> 根目录
              </button>
              {subPath.split('/').filter(Boolean).map((part, i, arr) => (
-               <React.Fragment key={i}>
+               <Fragment key={i}>
                   <ChevronRight className="w-3.5 h-3.5 opacity-30" />
                   <button 
                     onClick={() => setSearchParams({ p: arr.slice(0, i + 1).join('/') })}
@@ -297,7 +297,7 @@ export function SharePage() {
                   >
                     {part}
                   </button>
-               </React.Fragment>
+               </Fragment>
              ))}
           </div>
         )}
