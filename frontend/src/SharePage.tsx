@@ -282,23 +282,25 @@ export function SharePage() {
           {info.title || info.name}
         </h1>
         
-        {/* 面包屑导航 (仅在子目录下显示) */}
-        <div className="flex flex-wrap items-center justify-center gap-2 text-sm font-medium text-slate-400">
-           <button onClick={() => setSearchParams({})} className={cn("flex items-center gap-1 hover:text-indigo-600 transition-colors", !subPath && "text-slate-600 font-bold pointer-events-none")}>
-             <Home className="w-4 h-4" /> 根目录
-           </button>
-           {subPath.split('/').filter(Boolean).map((part, i, arr) => (
-             <React.Fragment key={i}>
-                <ChevronRight className="w-3.5 h-3.5 opacity-30" />
-                <button 
-                  onClick={() => setSearchParams({ p: arr.slice(0, i + 1).join('/') })}
-                  className={cn("hover:text-indigo-600 transition-colors", i === arr.length - 1 && "text-indigo-600 font-bold")}
-                >
-                  {part}
-                </button>
-             </React.Fragment>
-           ))}
-        </div>
+        {/* 面包屑导航仅在“目录分享”时显示；单文件分享不展示“根目录”概念 */}
+        {info.isDirectory && (
+          <div className="flex flex-wrap items-center justify-center gap-2 text-sm font-medium text-slate-400">
+             <button onClick={() => setSearchParams({})} className={cn("flex items-center gap-1 hover:text-indigo-600 transition-colors", !subPath && "text-slate-600 font-bold pointer-events-none")}>
+               <Home className="w-4 h-4" /> 根目录
+             </button>
+             {subPath.split('/').filter(Boolean).map((part, i, arr) => (
+               <React.Fragment key={i}>
+                  <ChevronRight className="w-3.5 h-3.5 opacity-30" />
+                  <button 
+                    onClick={() => setSearchParams({ p: arr.slice(0, i + 1).join('/') })}
+                    className={cn("hover:text-indigo-600 transition-colors", i === arr.length - 1 && "text-indigo-600 font-bold")}
+                  >
+                    {part}
+                  </button>
+               </React.Fragment>
+             ))}
+          </div>
+        )}
       </header>
 
       {/* 中心内容区 */}
