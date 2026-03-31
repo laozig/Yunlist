@@ -1,5 +1,8 @@
 import Fastify from 'fastify';
 import fastifyJwt from '@fastify/jwt';
+import fastifyStatic from '@fastify/static';
+import fs from 'fs';
+import path from 'path';
 import { config } from './config';
 import { initDB } from './db';
 import adminRoutes from './routes/admin';
@@ -42,6 +45,28 @@ fastify.post('/api/login', {
 fastify.register(adminRoutes, { prefix: '/api/admin' });
 // 挂载对外分享接口 API
 fastify.register(shareRoutes, { prefix: '/api/share' });
+
+const frontendDistPath = config.frontendDistPath;
+const frontendIndexPath = path.join(frontendDistPath, 'index.html');
+
+if (fs.existsSync(frontendDistPath) && fs.existsSync(frontendIndexPath)) {
+  fastify.register(fastifyStatic, {
+    root: frontendDistPath,
+    prefix: '/',
+    index: false,
+  });
+
+  fastify.setNotFoundHandler((request, reply) => {
+    const requestUrl = request.raw.url || '';
+    const isApiRequest = requestUrl === '/api' || requestUrl.startsWith('/api/');
+
+    if (request.method === 'GET' && !isApiRequest) {
+      return reply.type('text/html; charset=utf-8').send(fs.createReadStream(frontendIndexPath));
+    }
+
+    return reply.code(404).send({ error: 'Not Found' });
+  });
+}
 
 // 启动服务
 const start = async () => {

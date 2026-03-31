@@ -1,0 +1,14 @@
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+.git/
+.gitignore
+data/
+caddy_data/
+caddy_config/
+db.sqlite
+db.sqlite-shm
+db.sqlite-wal
+storage/
+*.log

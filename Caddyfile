@@ -1,0 +1,10 @@
+{
+    # 改成你自己的邮箱，用于 Let’s Encrypt 证书通知
+    email your-email@example.com
+}
+
+# 将下面的域名改成你自己的正式域名
+your-domain.example.com {
+    encode zstd gzip
+    reverse_proxy app:3000
+}

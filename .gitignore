@@ -6,3 +6,6 @@ dist/
 *.sqlite-shm
 *.sqlite-wal
 storage/.trash/
+data/
+caddy_data/
+caddy_config/

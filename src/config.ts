@@ -16,4 +16,5 @@ export const config = {
   filesRoot: path.resolve(process.cwd(), process.env['FILES_ROOT'] ?? 'storage'),
   port: parseInt(process.env['PORT'] ?? '3000', 10),
   dbPath: path.resolve(process.cwd(), process.env['DB_PATH'] ?? 'db.sqlite'),
+  frontendDistPath: path.resolve(process.cwd(), process.env['FRONTEND_DIST_PATH'] ?? path.join('frontend', 'dist')),
 };
