@@ -122,7 +122,7 @@ export function TrashView() {
   }
 
   return (
-    <div className="flex-1 p-8 overflow-y-auto bg-gray-50/30">
+    <div className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto bg-gray-50/30">
       <div className="max-w-6xl mx-auto space-y-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
@@ -175,7 +175,7 @@ export function TrashView() {
         ) : (
           <div className="grid grid-cols-1 gap-4">
             {filteredItems.map((item) => (
-              <div key={item.id} className="bg-white/85 backdrop-blur-sm rounded-3xl border border-white/60 shadow-sm p-5 flex items-center gap-5">
+              <div key={item.id} className="bg-white/85 backdrop-blur-sm rounded-3xl border border-white/60 shadow-sm p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5">
                 <button
                   onClick={() => toggleSelection(item)}
                   className={`w-6 h-6 rounded-full border shrink-0 flex items-center justify-center text-xs font-bold ${selectedIdSet.has(item.id) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-gray-400'}`}
@@ -196,7 +196,7 @@ export function TrashView() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 shrink-0 w-full sm:w-auto">
                   <button
                     onClick={() => handleRestore(item)}
                     className="px-4 py-2 rounded-full bg-emerald-50 text-emerald-700 text-sm font-semibold hover:bg-emerald-100 transition inline-flex items-center gap-1.5"

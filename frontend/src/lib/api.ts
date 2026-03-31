@@ -13,6 +13,18 @@ export interface BlobResponse {
   contentType: string;
 }
 
+export interface UploadFileProgress {
+  loaded: number;
+  total: number;
+  percent: number;
+  speed: number;
+  elapsed: number;
+}
+
+export interface UploadFileOptions {
+  onProgress?: (progress: UploadFileProgress) => void;
+}
+
 export interface TrashItem {
   id: string;
   original_path: string;
@@ -227,13 +239,69 @@ export const api = {
       body: JSON.stringify({ dirPath, name })
     }),
 
-  uploadFile: (dirPath: string, file: File) => {
+  uploadFile: (dirPath: string, file: File, options: UploadFileOptions = {}) => {
     const formData = new FormData();
     formData.append('dirPath', dirPath);
     formData.append('file', file);
-    return request<{success: boolean, relativePath: string}>('/api/admin/upload', {
-      method: 'POST',
-      body: formData
+
+    return new Promise<{ success: boolean; relativePath: string }>((resolve, reject) => {
+      const token = localStorage.getItem('yunlist_token');
+      const xhr = new XMLHttpRequest();
+      const startedAt = Date.now();
+
+      xhr.open('POST', '/api/admin/upload', true);
+
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      }
+
+      xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable) return;
+
+        const total = event.total || file.size || event.loaded;
+        const elapsed = Math.max((Date.now() - startedAt) / 1000, 0.001);
+
+        options.onProgress?.({
+          loaded: event.loaded,
+          total,
+          percent: total > 0 ? Math.min((event.loaded / total) * 100, 100) : 0,
+          speed: event.loaded / elapsed,
+          elapsed,
+        });
+      };
+
+      xhr.onerror = () => {
+        reject(new ApiError(0, '网络异常，上传失败'));
+      };
+
+      xhr.onabort = () => {
+        reject(new ApiError(0, '上传已取消'));
+      };
+
+      xhr.onload = () => {
+        let data: any = null;
+
+        try {
+          data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+        } catch {
+          data = null;
+        }
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(data as { success: boolean; relativePath: string });
+          return;
+        }
+
+        if (xhr.status === 401) {
+          localStorage.removeItem('yunlist_token');
+          window.location.reload();
+          return;
+        }
+
+        reject(new ApiError(xhr.status, data?.error || '上传失败'));
+      };
+
+      xhr.send(formData);
     });
   },
 

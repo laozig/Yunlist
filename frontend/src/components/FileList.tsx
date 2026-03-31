@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent } from 'react';
-import { File, Folder, MoreHorizontal, UploadCloud, FolderPlus, Trash2, Search, Download, Copy } from 'lucide-react';
+import { File, Folder, MoreHorizontal, UploadCloud, FolderPlus, Trash2, Search, Download, Copy, CheckCircle2, AlertCircle, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { api, triggerBlobDownload } from '../lib/api';
@@ -35,10 +35,38 @@ interface FileListProps {
   onUpdate?: () => void;
 }
 
+interface UploadTask {
+  id: string;
+  name: string;
+  size: number;
+  loaded: number;
+  total: number;
+  percent: number;
+  speed: number;
+  status: 'pending' | 'uploading' | 'success' | 'error';
+  error?: string;
+}
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  const size = value / Math.pow(1024, index);
+
+  return `${size.toFixed(size >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function formatSpeed(bytesPerSecond: number) {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return '计算中';
+  return `${formatBytes(bytesPerSecond)}/s`;
+}
+
 export function FileList({ files, currentPath, onFileClick, onDetailClick, selectedFileId, onUpdate }: FileListProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [sortMode, setSortMode] = useState<'name-asc' | 'name-desc' | 'size-desc' | 'size-asc' | 'updated-desc' | 'updated-asc'>('name-asc');
@@ -104,19 +132,70 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
 
   const resetSelection = () => setSelectedPaths([]);
 
+  const updateUploadTask = (id: string, patch: Partial<UploadTask>) => {
+    setUploadTasks(prev => prev.map(task => task.id === id ? { ...task, ...patch } : task));
+  };
+
   const uploadFiles = async (uploadTargets: File[]) => {
     if (uploadTargets.length === 0) return;
 
+    const uploadDir = currentPath;
+    const nextTasks: UploadTask[] = uploadTargets.map((file, index) => ({
+      id: `${file.name}-${file.lastModified}-${index}-${Date.now()}`,
+      name: file.name,
+      size: file.size,
+      loaded: 0,
+      total: file.size,
+      percent: 0,
+      speed: 0,
+      status: 'pending',
+    }));
+
+    setUploadTasks(nextTasks);
     setIsUploading(true);
     const failedFiles: string[] = [];
 
     try {
-      for (const uploadTarget of uploadTargets) {
+      for (let index = 0; index < uploadTargets.length; index += 1) {
+        const uploadTarget = uploadTargets[index];
+        const task = nextTasks[index];
+
         try {
-          await api.uploadFile(currentPath, uploadTarget);
-        } catch (err) {
+          updateUploadTask(task.id, {
+            status: 'uploading',
+            speed: 0,
+            loaded: 0,
+            total: uploadTarget.size,
+            percent: 0,
+          });
+
+          await api.uploadFile(uploadDir, uploadTarget, {
+            onProgress: (progress) => {
+              updateUploadTask(task.id, {
+                status: 'uploading',
+                loaded: progress.loaded,
+                total: progress.total,
+                percent: progress.percent,
+                speed: progress.speed,
+              });
+            },
+          });
+
+          updateUploadTask(task.id, {
+            status: 'success',
+            loaded: uploadTarget.size,
+            total: uploadTarget.size,
+            percent: 100,
+            speed: 0,
+          });
+        } catch (err: any) {
           console.error(err);
           failedFiles.push(uploadTarget.name);
+          updateUploadTask(task.id, {
+            status: 'error',
+            speed: 0,
+            error: err?.message || '上传失败',
+          });
         }
       }
 
@@ -128,6 +207,48 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const overallUploadTotal = uploadTasks.reduce((sum, task) => sum + Math.max(task.total || task.size, 0), 0);
+  const overallUploaded = uploadTasks.reduce((sum, task) => sum + Math.max(task.loaded, 0), 0);
+  const overallPercent = overallUploadTotal > 0 ? Math.min((overallUploaded / overallUploadTotal) * 100, 100) : 0;
+  const uploadingCount = uploadTasks.filter(task => task.status === 'uploading').length;
+  const successCount = uploadTasks.filter(task => task.status === 'success').length;
+  const failedCount = uploadTasks.filter(task => task.status === 'error').length;
+  const currentUploadSpeed = uploadTasks.reduce((sum, task) => sum + (task.status === 'uploading' ? task.speed : 0), 0);
+  const activeUploadTask = uploadTasks.find(task => task.status === 'uploading');
+
+  const getTaskStatusMeta = (task: UploadTask) => {
+    switch (task.status) {
+      case 'success':
+        return {
+          label: '已完成',
+          icon: CheckCircle2,
+          tone: 'text-emerald-600 bg-emerald-50 border-emerald-100',
+          bar: 'from-emerald-500 to-teal-500',
+        };
+      case 'error':
+        return {
+          label: '失败',
+          icon: AlertCircle,
+          tone: 'text-rose-600 bg-rose-50 border-rose-100',
+          bar: 'from-rose-500 to-orange-500',
+        };
+      case 'uploading':
+        return {
+          label: '上传中',
+          icon: UploadCloud,
+          tone: 'text-indigo-600 bg-indigo-50 border-indigo-100',
+          bar: 'from-indigo-500 to-fuchsia-500',
+        };
+      default:
+        return {
+          label: '等待中',
+          icon: UploadCloud,
+          tone: 'text-gray-500 bg-gray-50 border-gray-100',
+          bar: 'from-gray-400 to-gray-500',
+        };
     }
   };
 
@@ -281,13 +402,13 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
 
   return (
     <div
-      className="flex-1 p-8 overflow-y-auto relative"
+      className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto relative"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 sm:mb-8">
         <h2 className="text-2xl font-bold text-gray-800 tracking-tight">文件存储</h2>
         <div className="flex items-center gap-3">
           <button 
@@ -310,10 +431,94 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
         </div>
       </div>
 
+      {uploadTasks.length > 0 && (
+        <div className="mb-6 rounded-3xl border border-indigo-100 bg-white/85 backdrop-blur-sm p-5 shadow-sm">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
+            <div>
+              <div className="flex items-center gap-2 text-indigo-600 mb-1">
+                <UploadCloud className="w-4 h-4" />
+                <span className="text-xs font-bold uppercase tracking-[0.25em]">上传队列</span>
+              </div>
+              <h3 className="text-lg font-bold text-gray-800">
+                {isUploading ? `正在上传：${activeUploadTask?.name || '文件'}` : `上传完成：成功 ${successCount} 个${failedCount ? `，失败 ${failedCount} 个` : ''}`}
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                {isUploading
+                  ? `当前速度 ${formatSpeed(currentUploadSpeed)} · 总进度 ${overallPercent.toFixed(1)}%`
+                  : '你可以继续上传，或清空本次上传记录。'}
+              </p>
+            </div>
+
+            {!isUploading && (
+              <button
+                onClick={() => setUploadTasks([])}
+                className="self-start lg:self-center inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 transition"
+              >
+                <X className="w-4 h-4" /> 清空记录
+              </button>
+            )}
+          </div>
+
+          <div className="mb-4">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span className="font-semibold text-gray-600">总体进度</span>
+              <span className="font-mono text-gray-500">{formatBytes(overallUploaded)} / {formatBytes(overallUploadTotal)}</span>
+            </div>
+            <div className="h-3 rounded-full bg-gray-100 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-sky-500 transition-all duration-300"
+                style={{ width: `${overallPercent}%` }}
+              />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-3 text-xs text-gray-500">
+              <span>总数：{uploadTasks.length}</span>
+              <span>上传中：{uploadingCount}</span>
+              <span>成功：{successCount}</span>
+              <span>失败：{failedCount}</span>
+            </div>
+          </div>
+
+          <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+            {uploadTasks.map(task => {
+              const statusMeta = getTaskStatusMeta(task);
+              const StatusIcon = statusMeta.icon;
+
+              return (
+                <div key={task.id} className="rounded-2xl border border-gray-100 bg-gray-50/80 p-4">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-gray-800 truncate" title={task.name}>{task.name}</div>
+                      <div className="text-xs text-gray-500 mt-1">{formatBytes(task.size)}{task.status === 'uploading' ? ` · ${formatSpeed(task.speed)}` : ''}{task.error ? ` · ${task.error}` : ''}</div>
+                    </div>
+
+                    <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold ${statusMeta.tone}`}>
+                      <StatusIcon className={cn('w-3.5 h-3.5', task.status === 'uploading' && 'animate-pulse')} />
+                      {statusMeta.label}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+                    <span>{formatBytes(task.loaded)} / {formatBytes(task.total || task.size)}</span>
+                    <span className="font-mono">{task.percent.toFixed(1)}%</span>
+                  </div>
+
+                  <div className="h-2.5 rounded-full bg-white overflow-hidden border border-gray-100">
+                    <div
+                      className={`h-full rounded-full bg-gradient-to-r ${statusMeta.bar} transition-all duration-300`}
+                      style={{ width: `${Math.max(0, Math.min(task.percent, 100))}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="mb-6 rounded-3xl border border-white/50 bg-white/70 backdrop-blur-sm p-4 shadow-sm space-y-4">
         <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
           <div className="flex-1 flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1 min-w-[220px]">
+            <div className="relative flex-1 min-w-0 sm:min-w-[220px]">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 value={searchKeyword}
@@ -436,7 +641,7 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
                 {selectedPathSet.has(file.relativePath) ? '✓' : ''}
               </button>
 
-              <div className="absolute top-4 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+              <div className="absolute top-3 right-3 flex flex-wrap justify-end max-w-[55%] items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity z-20">
                 <button 
                   onClick={(e) => { e.stopPropagation(); handleArchiveDownload(file); }}
                   className="p-1.5 hover:bg-emerald-50 rounded-full text-gray-400 hover:text-emerald-600 outline-none transition-colors"

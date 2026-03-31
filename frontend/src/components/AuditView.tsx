@@ -50,7 +50,7 @@ export function AuditView() {
   }
 
   return (
-    <div className="flex-1 p-8 overflow-y-auto bg-gray-50/30">
+    <div className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto bg-gray-50/30">
       <div className="max-w-6xl mx-auto space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
           <div>
@@ -140,7 +140,7 @@ export function AuditView() {
                     <p className="text-xs text-gray-500 mt-1 break-all">/{item.relative_path}</p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-gray-500 min-w-[320px]">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-gray-500 lg:min-w-[320px]">
                     <div>
                       <p className="text-gray-400 uppercase tracking-wider mb-1">来源 IP</p>
                       <p className="font-medium text-gray-700 break-all">{item.ip_address || '未知'}</p>

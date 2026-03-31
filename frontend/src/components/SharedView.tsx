@@ -66,7 +66,8 @@ export function SharedView() {
   }
 
   return (
-    <div className="flex-1 p-8 overflow-y-auto">
+    <div className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto bg-gray-50/30">
+      <div className="max-w-6xl mx-auto">
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-gray-800 tracking-tight">已分享文件</h2>
         <p className="text-sm text-gray-500 mt-1">管理全站范围内所有已开启公开访问的文件。</p>
@@ -80,13 +81,13 @@ export function SharedView() {
       ) : (
         <div className="grid grid-cols-1 gap-4">
           {files.map((file) => (
-            <div key={file.relative_path} className="bg-white/80 backdrop-blur-sm border border-white/50 p-6 rounded-2xl shadow-sm hover:shadow-md transition-all flex items-center gap-6 group">
+            <div key={file.relative_path} className="bg-white/80 backdrop-blur-sm border border-white/50 p-4 sm:p-6 rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 group">
                <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-500 flex items-center justify-center shrink-0">
                   <Download className="w-6 h-6" />
                </div>
                <div className="flex-1 min-w-0">
                   <h3 className="font-bold text-gray-800 truncate">{file.title || file.relative_path.split('/').pop()}</h3>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-gray-400 font-medium">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-1 text-xs text-gray-400 font-medium">
                      <span>{file.relative_path}</span>
                      {file.access_password && <span className="flex items-center gap-1 text-amber-500"><ShieldCheck className="w-3 h-3" /> 加密</span>}
                      {file.expires_at && <span className="flex items-center gap-1 text-rose-500"><CalendarClock className="w-3 h-3" /> 限时</span>}
@@ -100,7 +101,7 @@ export function SharedView() {
                     {file.max_downloads != null && <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">下载上限 {file.max_downloads}</span>}
                   </div>
                </div>
-               <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+               <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:justify-end opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                   <button 
                     onClick={() => handleArchiveDownload(file)}
                     className="p-2 hover:bg-emerald-50 text-emerald-600 rounded-lg transition"
@@ -150,6 +151,7 @@ export function SharedView() {
         url={qrTarget?.url || ''}
         onClose={() => setQrTarget(null)}
       />
+      </div>
     </div>
   );
 }

@@ -9,7 +9,7 @@ import { AnalyticsView } from './components/AnalyticsView';
 import { TrashView } from './components/TrashView';
 import { AuditView } from './components/AuditView';
 import { api } from './lib/api';
-import { Lock, LogOut, User, ChevronDown } from 'lucide-react';
+import { Lock, LogOut, User, ChevronDown, Menu } from 'lucide-react';
 import { cn } from './lib/utils';
 
 function App() {
@@ -23,6 +23,7 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
 
   const fetchFiles = async (dir = currentPath) => {
     if (activeView !== 'explorer') return;
@@ -88,7 +89,7 @@ function App() {
   if (!token) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <form onSubmit={handleLogin} className="bg-white p-8 rounded-2xl shadow-xl w-96 flex flex-col items-center">
+        <form onSubmit={handleLogin} className="bg-white p-6 sm:p-8 rounded-2xl shadow-xl w-[92vw] max-w-sm flex flex-col items-center">
            <div className="w-16 h-16 rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center mb-6">
              <Lock className="w-8 h-8" />
            </div>
@@ -140,17 +141,32 @@ function App() {
 
   return (
     <div className="flex h-screen w-screen bg-[url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop')] bg-cover bg-center overflow-hidden font-sans selection:bg-indigo-100 selection:text-indigo-900 text-gray-800">
-      <Sidebar activeItem={activeView} onSelect={(view) => { setActiveView(view); setSelectedFile(null); }} />
+      <Sidebar
+        activeItem={activeView}
+        isOpen={showSidebar}
+        onClose={() => setShowSidebar(false)}
+        onSelect={(view) => {
+          setActiveView(view);
+          setSelectedFile(null);
+          setShowSidebar(false);
+        }}
+      />
 
       <main className="flex-1 relative flex flex-col h-full overflow-hidden bg-white/60 backdrop-blur-2xl">
-        <header className="h-20 flex items-center px-8 border-b border-white/40 sticky top-0 z-10 shrink-0">
+        <header className="h-16 sm:h-20 flex items-center px-4 sm:px-6 lg:px-8 border-b border-white/40 sticky top-0 z-10 shrink-0">
           <div className="flex-1 flex gap-2 items-center">
+             <button
+               onClick={() => setShowSidebar(true)}
+               className="lg:hidden inline-flex items-center justify-center w-10 h-10 rounded-xl bg-white/70 border border-white shadow-sm text-gray-600"
+             >
+               <Menu className="w-5 h-5" />
+             </button>
              {activeView === 'explorer' && currentPath && (
                <button onClick={goBack} className="px-3 py-1.5 rounded-full hover:bg-white/50 bg-white/30 backdrop-blur shadow-sm text-sm font-semibold transition">
                  ← 返回
                </button>
              )}
-             <div className="inline-flex px-3 py-1.5 rounded-full bg-white/50 border border-white backdrop-blur shadow-sm text-xs font-semibold text-gray-500">
+             <div className="inline-flex max-w-full px-3 py-1.5 rounded-full bg-white/50 border border-white backdrop-blur shadow-sm text-xs font-semibold text-gray-500 truncate">
                 {activeView === 'explorer' ? '我的文件' : 
                  activeView === 'shared' ? '已分享' : 
                  activeView === 'analytics' ? '数据分析' :
@@ -166,7 +182,7 @@ function App() {
           <div className="relative">
              <button 
                onClick={() => setShowProfileMenu(!showProfileMenu)}
-               className="flex items-center gap-3 p-1.5 pr-3 rounded-full hover:bg-white/50 transition-all border border-transparent hover:border-white/40 group"
+               className="flex items-center gap-2 sm:gap-3 p-1.5 sm:pr-3 rounded-full hover:bg-white/50 transition-all border border-transparent hover:border-white/40 group"
              >
                 <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-500 to-blue-500 border border-white/20 shadow-sm flex items-center justify-center font-bold text-white text-sm">
                    A
@@ -197,7 +213,7 @@ function App() {
           </div>
         </header>
 
-        {isLoading && <div className="absolute top-20 left-0 w-full h-1 bg-indigo-500/20 overflow-hidden"><div className="w-1/3 h-full bg-indigo-500 animate-[slide_1s_ease-in-out_infinite]" /></div>}
+        {isLoading && <div className="absolute top-16 sm:top-20 left-0 w-full h-1 bg-indigo-500/20 overflow-hidden"><div className="w-1/3 h-full bg-indigo-500 animate-[slide_1s_ease-in-out_infinite]" /></div>}
         
         {renderMainContent()}
       </main>

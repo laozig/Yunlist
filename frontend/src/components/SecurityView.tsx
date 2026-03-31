@@ -35,7 +35,7 @@ export function SecurityView() {
   };
 
   return (
-    <div className="flex-1 p-8 max-w-2xl">
+    <div className="flex-1 p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto overflow-y-auto">
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-gray-800 tracking-tight">安全管理</h2>
         <p className="text-sm text-gray-500 mt-1">保护您的网盘控制台免受未经授权的访问。</p>

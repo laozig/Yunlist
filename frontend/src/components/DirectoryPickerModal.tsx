@@ -169,7 +169,7 @@ export function DirectoryPickerModal({ open, mode, initialPath, sourcePaths, onC
               当前目录下暂无可选子文件夹，你也可以直接确认选择当前目录。
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[45vh] overflow-y-auto pr-1">
               {directories.map((directory) => (
                 <button
                   key={directory.relativePath}

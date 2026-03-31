@@ -50,9 +50,9 @@ export function AnalyticsView() {
   const { dashboard, hotFiles } = data;
 
   return (
-    <div className="flex-1 p-8 overflow-y-auto bg-gray-50/30">
+    <div className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto bg-gray-50/30">
       <div className="max-w-6xl mx-auto space-y-8">
-        <header className="flex items-end justify-between">
+        <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
             <h2 className="text-3xl font-black text-gray-900 tracking-tight">数据中心</h2>
             <p className="text-gray-500 font-medium mt-1">洞察全站文件的传播与响应趋势</p>
@@ -128,7 +128,7 @@ export function AnalyticsView() {
         </div>
 
         {/* Hot Files List */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
           <div className="md:col-span-2 bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-gray-50 flex items-center justify-between">
               <div className="flex items-center gap-3">

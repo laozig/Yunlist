@@ -1,12 +1,14 @@
-import { HardDrive, Settings, FolderClosed, Users, ShieldAlert, BarChart3, Trash2, ScrollText } from 'lucide-react';
+import { HardDrive, Settings, FolderClosed, Users, ShieldAlert, BarChart3, Trash2, ScrollText, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface SidebarProps {
   activeItem: string;
+  isOpen?: boolean;
+  onClose?: () => void;
   onSelect: (name: string) => void;
 }
 
-export function Sidebar({ activeItem, onSelect }: SidebarProps) {
+export function Sidebar({ activeItem, isOpen = false, onClose, onSelect }: SidebarProps) {
   const menuItems = [
     { id: 'explorer', name: '我的文件', icon: HardDrive },
     { id: 'shared', name: '已分享', icon: Users },
@@ -17,16 +19,25 @@ export function Sidebar({ activeItem, onSelect }: SidebarProps) {
     { id: 'settings', name: '系统设置', icon: Settings },
   ];
 
-  return (
-    <aside className="w-64 h-full bg-white/60 backdrop-blur-md border-r border-gray-200/50 flex flex-col items-center py-8">
-      <div className="flex items-center gap-3 mb-10 w-full px-8">
-        <div className="w-10 h-10 bg-gradient-to-tr from-indigo-600 to-blue-500 rounded-xl shadow-lg flex items-center justify-center">
-          <FolderClosed className="text-white w-5 h-5" />
+  const sidebarContent = (
+    <>
+      <div className="flex items-center justify-between mb-8 lg:mb-10 w-full px-6 lg:px-8">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 bg-gradient-to-tr from-indigo-600 to-blue-500 rounded-xl shadow-lg flex items-center justify-center shrink-0">
+            <FolderClosed className="text-white w-5 h-5" />
+          </div>
+          <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 tracking-tight truncate">Yunlist</h1>
         </div>
-        <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 tracking-tight">Yunlist</h1>
+
+        <button
+          onClick={onClose}
+          className="lg:hidden inline-flex items-center justify-center w-10 h-10 rounded-xl hover:bg-gray-100 text-gray-500"
+        >
+          <X className="w-5 h-5" />
+        </button>
       </div>
 
-      <nav className="flex-1 w-full px-4 space-y-2">
+      <nav className="flex-1 w-full px-4 space-y-2 overflow-y-auto">
         {menuItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeItem === item.id;
@@ -35,20 +46,20 @@ export function Sidebar({ activeItem, onSelect }: SidebarProps) {
               key={item.id}
               onClick={() => onSelect(item.id)}
               className={cn(
-                "w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-300 font-medium text-sm",
-                isActive 
-                  ? "bg-white shadow-sm text-indigo-600 ring-1 ring-gray-100" 
-                  : "text-gray-500 hover:bg-gray-100/50 hover:text-gray-900"
+                'w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-300 font-medium text-sm',
+                isActive
+                  ? 'bg-white shadow-sm text-indigo-600 ring-1 ring-gray-100'
+                  : 'text-gray-500 hover:bg-gray-100/50 hover:text-gray-900'
               )}
             >
               <Icon className="w-5 h-5" strokeWidth={isActive ? 2.5 : 2} />
               {item.name}
             </button>
-          )
+          );
         })}
       </nav>
 
-      <div className="mt-auto px-6 w-full">
+      <div className="mt-auto px-4 lg:px-6 w-full">
         <div className="w-full bg-gradient-to-br from-indigo-50 to-blue-50 border border-blue-100/50 rounded-2xl p-4 flex flex-col items-center text-center">
           <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center mb-3">
             <span className="font-bold text-indigo-600 text-sm">Ad</span>
@@ -57,6 +68,27 @@ export function Sidebar({ activeItem, onSelect }: SidebarProps) {
           <p className="text-xs text-gray-500 mt-1">存储使用率 42%</p>
         </div>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        className={cn(
+          'fixed inset-0 z-40 bg-slate-900/35 backdrop-blur-sm transition-opacity lg:hidden',
+          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        )}
+      />
+
+      <aside
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 w-[280px] max-w-[85vw] lg:static lg:w-64 h-full bg-white/85 backdrop-blur-md border-r border-gray-200/50 flex flex-col py-6 lg:py-8 transition-transform duration-300',
+          isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        )}
+      >
+        {sidebarContent}
+      </aside>
+    </>
   );
 }

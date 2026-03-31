@@ -136,10 +136,10 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: '100%', opacity: 0.5 }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed right-0 top-0 bottom-0 w-[420px] bg-white shadow-[0_0_40px_rgba(0,0,0,0.05)] z-50 flex flex-col border-l border-gray-100/50"
+            className="fixed inset-0 sm:inset-y-0 sm:right-0 sm:left-auto w-full sm:w-[420px] bg-white shadow-[0_0_40px_rgba(0,0,0,0.05)] z-50 flex flex-col border-l border-gray-100/50"
           >
             {/* Header */}
-            <div className="px-8 flex items-center justify-between h-20 border-b border-gray-100">
+            <div className="px-4 sm:px-8 flex items-center justify-between h-16 sm:h-20 border-b border-gray-100">
               <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                 <Info className="w-5 h-5 text-indigo-500" />
                 {file.isDirectory ? '文件夹详情' : '文件详情'}
@@ -153,7 +153,7 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
             </div>
 
             {/* Content Body */}
-            <div className="flex-1 overflow-y-auto p-8 space-y-8">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6 sm:space-y-8">
               {/* File Icon & Info Box */}
               <div className="bg-indigo-50/50 rounded-2xl p-6 flex flex-col items-center justify-center border border-indigo-100/50 relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl -mr-16 -mt-16" />
@@ -173,7 +173,7 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
                 </div>
 
                 {file.isDirectory && onFolderOpen && (
-                   <div className="w-full grid grid-cols-2 gap-2">
+                   <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-2">
                      <button 
                        onClick={() => onFolderOpen(file)}
                        className="h-10 rounded-xl bg-white text-indigo-600 text-xs font-bold border border-indigo-100 shadow-sm hover:shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 relative z-10 hover:bg-indigo-50"
@@ -235,7 +235,7 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
             </div>
 
             {/* Footer / Share Control */}
-            <div className="p-8 bg-gray-50/80 border-t border-gray-100 backdrop-blur-md">
+            <div className="p-4 sm:p-8 bg-gray-50/80 border-t border-gray-100 backdrop-blur-md">
               <div className="flex items-center justify-between mb-4">
                 <label className="text-sm font-semibold text-gray-700">公开分享链接</label>
                 <button 
@@ -334,7 +334,7 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
                           />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1.5">
                             <label className="text-xs font-bold uppercase tracking-wider text-gray-400 ml-1">
                               最大访问次数
@@ -364,7 +364,7 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3 text-xs font-medium text-gray-500 bg-white rounded-2xl border border-gray-100 p-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-medium text-gray-500 bg-white rounded-2xl border border-gray-100 p-4">
                           <div>
                             <p className="text-gray-400 uppercase tracking-wider text-[10px] mb-1">累计访问</p>
                             <p className="text-base font-bold text-gray-700">{file.metaInfo?.views ?? 0}</p>
