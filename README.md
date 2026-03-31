@@ -145,6 +145,9 @@ npm run preview
 - `Dockerfile`
 - `docker-compose.yml`
 - `Caddyfile`
+- `ecosystem.config.js`
+- `deploy.sh`
+- `Caddyfile.native`
 - `deploy.md`
 
 推荐直接阅读：
@@ -153,7 +156,16 @@ npm run preview
 deploy.md
 ```
 
+### 两种部署方式对比
+
+| 方式 | 说明 | 适合场景 |
+|---|---|---|
+| 方式 A：Docker | 使用 `Dockerfile + docker-compose.yml + Caddyfile`，环境一致、隔离性更好 | 追求稳定、易迁移、易复现 |
+| 方式 B：Native PM2 | 使用 `ecosystem.config.js + deploy.sh + Caddyfile.native`，直接运行在宿主机 | 追求极速启动、低资源消耗 |
+
 ### 快速启动
+
+#### 方式 A：Docker
 
 ```bash
 cp .env.example .env
@@ -163,6 +175,22 @@ docker compose up -d --build
 ```
 
 部署完成后由 Caddy 自动提供 HTTPS。
+
+#### 方式 B：Native PM2
+
+```bash
+cp .env.example .env
+# 修改 .env
+# 修改 Caddyfile.native 中的域名和邮箱
+chmod +x deploy.sh
+./deploy.sh
+```
+
+部署脚本会自动：
+- 检测并安装缺失的系统依赖（node / npm / python3 / pip3 / make / g++）
+- 安装前后端依赖
+- 构建前端和后端
+- 使用 PM2 启动或重载 `yunlist`
 
 ## 数据持久化说明
 
@@ -191,3 +219,4 @@ docker compose up -d --build
 - 本项目使用 SQLite，适合轻量场景与单实例部署。
 - 分享二维码目前通过在线服务生成，便于快速使用。
 - 若需要更复杂的多用户权限、对象存储、分片上传等能力，可在现有基础上继续扩展。
+- Native PM2 部署模式下，推荐将 Caddy 配合 `Caddyfile.native` 使用，把 HTTPS 与反向代理交给宿主机处理。

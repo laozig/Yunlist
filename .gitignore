@@ -9,3 +9,4 @@ storage/.trash/
 data/
 caddy_data/
 caddy_config/
+logs/
