@@ -2,12 +2,56 @@ import { FastifyInstance } from 'fastify';
 import fs from 'fs';
 import path from 'path';
 import { getSecureFilePath, normalizeRelativePath } from '../utils/pathUtils';
-import { FileMetaModel } from '../models/fileMeta';
+import { FileMetaModel, type FileMeta } from '../models/fileMeta';
 
 /** 判断 childPath 是否在 parentPath 范围内（路径段级别，不是字符串前缀） */
 function isWithinSharedRoot(childPath: string, parentPath: string): boolean {
+  if (!parentPath) return true;
   if (childPath === parentPath) return true;
   return childPath.startsWith(parentPath + '/');
+}
+
+/** 将任意路径转换为“相对于分享根目录”的子路径 */
+function toShareRelativePath(targetPath: string, sharedRootPath: string): string {
+  const normalizedTarget = normalizeRelativePath(targetPath);
+  const normalizedSharedRoot = normalizeRelativePath(sharedRootPath);
+
+  if (!normalizedSharedRoot) return normalizedTarget;
+  if (normalizedTarget === normalizedSharedRoot) return '';
+
+  if (normalizedTarget.startsWith(normalizedSharedRoot + '/')) {
+    return normalizeRelativePath(normalizedTarget.slice(normalizedSharedRoot.length + 1));
+  }
+
+  return normalizedTarget;
+}
+
+async function resolveSharedTarget(id: string): Promise<{ meta: FileMeta; sharedRootPath: string } | null> {
+  let meta = await FileMetaModel.findByShareId(id);
+  let sharedRootPath = '';
+
+  if (meta) {
+    sharedRootPath = meta.relative_path;
+  } else {
+    try {
+      const decodedPath = decodeURIComponent(Buffer.from(id, 'base64').toString('utf8'));
+      sharedRootPath = normalizeRelativePath(decodedPath);
+      meta = await FileMetaModel.findByPath(sharedRootPath);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  if (!meta || !meta.is_public) {
+    return null;
+  }
+
+  return { meta, sharedRootPath };
+}
+
+function buildCurrentRelativePath(sharedRootPath: string, requestedPath: string): string {
+  const subPath = toShareRelativePath(requestedPath, sharedRootPath);
+  return normalizeRelativePath(path.posix.join(sharedRootPath, subPath));
 }
 
 export default async function shareRoutes(fastify: FastifyInstance) {
@@ -17,73 +61,81 @@ export default async function shareRoutes(fastify: FastifyInstance) {
     const { p = '' } = request.query as any;
 
     try {
-      let meta: any = await FileMetaModel.findByShareId(id);
-      let sharedRootPath = '';
-
-      if (meta) {
-        sharedRootPath = meta.relative_path;
-      } else {
-        try {
-          const decodedPath = decodeURIComponent(Buffer.from(id, 'base64').toString('utf8'));
-          sharedRootPath = normalizeRelativePath(decodedPath);
-          meta = await FileMetaModel.findByPath(sharedRootPath);
-        } catch (e) {
-          return reply.code(404).send({ error: 'Shared content not found' });
-        }
-      }
-
-      if (!meta || !meta.is_public) {
+      const sharedTarget = await resolveSharedTarget(id);
+      if (!sharedTarget) {
         return reply.code(404).send({ error: '分享文件不存在或已关闭公开访问' });
       }
 
+      const { meta, sharedRootPath } = sharedTarget;
+      const currentPath = toShareRelativePath(p, sharedRootPath);
+
       // 构造最终物理路径，支持子路径漫游
-      const currentRelPath = normalizeRelativePath(path.posix.join(sharedRootPath, p));
+      const currentRelPath = buildCurrentRelativePath(sharedRootPath, currentPath);
 
       // 安全校验：路径段级别判断，防止字符串前缀误匹配
       if (!isWithinSharedRoot(currentRelPath, sharedRootPath)) {
         return reply.code(403).send({ error: 'Access denied: out of shared scope' });
       }
 
-      if (!p) {
+      if (!currentPath) {
         await FileMetaModel.logEvent(sharedRootPath, 'view');
       }
 
       const targetPath = getSecureFilePath(currentRelPath);
-      let size = 0;
-      let name = path.basename(targetPath);
-      let isDirectory = false;
-      let children: any[] = [];
-
-      if (fs.existsSync(targetPath)) {
-        const stats = fs.statSync(targetPath);
-        isDirectory = stats.isDirectory();
-        size = isDirectory ? 0 : stats.size;
-
-        if (isDirectory) {
-          const items = fs.readdirSync(targetPath, { withFileTypes: true });
-          for (const item of items) {
-            const childRelPath = normalizeRelativePath(path.posix.join(currentRelPath, item.name));
-            const childAbsPath = path.join(targetPath, item.name);
-            const childStat = fs.statSync(childAbsPath);
-            children.push({
-              name: item.name,
-              isDirectory: item.isDirectory(),
-              relativePath: childRelPath,
-              size: item.isDirectory() ? 0 : childStat.size,
-            });
-          }
-        }
-      } else {
+      if (!fs.existsSync(targetPath)) {
         return reply.code(404).send({ error: '物理文件不存在' });
       }
 
+      const stats = fs.statSync(targetPath);
+      const isDirectory = stats.isDirectory();
+      const size = isDirectory ? 0 : stats.size;
+      const name = path.basename(targetPath);
+      const updated_at = stats.mtime.toISOString();
+      const children: Array<{
+        name: string;
+        isDirectory: boolean;
+        relativePath: string;
+        relPath: string;
+        size: number;
+        updated_at: string;
+      }> = [];
+
+      if (isDirectory) {
+        const items = fs.readdirSync(targetPath, { withFileTypes: true });
+        for (const item of items) {
+          const childRelPath = normalizeRelativePath(path.posix.join(currentRelPath, item.name));
+          const childAbsPath = path.join(targetPath, item.name);
+          const childStat = fs.statSync(childAbsPath);
+          children.push({
+            name: item.name,
+            isDirectory: item.isDirectory(),
+            relativePath: childRelPath,
+            relPath: toShareRelativePath(childRelPath, sharedRootPath),
+            size: item.isDirectory() ? 0 : childStat.size,
+            updated_at: childStat.mtime.toISOString(),
+          });
+        }
+      }
+
       return {
+        id,
+        title: meta.title,
+        description: meta.description,
+        needsPassword: !!meta.access_password,
+        shareId: meta.share_id ?? null,
         meta: {
           title: meta.title,
           description: meta.description,
           access_password: meta.access_password ? true : false, // 不暴露密码内容
           share_id: meta.share_id,
         },
+        name,
+        size,
+        isDirectory,
+        currentPath,
+        updated_at,
+        relativePath: currentRelPath,
+        children,
         file: {
           name,
           isDirectory,
@@ -98,34 +150,23 @@ export default async function shareRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // 下载分享文件
-  fastify.get('/:id/download', async (request, reply) => {
+  const downloadSharedFile = async (request: any, reply: any, payload: any) => {
     const { id } = request.params as any;
-    const { p = '', password = '' } = request.query as any;
+    const { p = '', password = '' } = payload ?? {};
 
     try {
-      let meta: any = await FileMetaModel.findByShareId(id);
-      let sharedRootPath = '';
-
-      if (meta) {
-        sharedRootPath = meta.relative_path;
-      } else {
-        try {
-          const decodedPath = decodeURIComponent(Buffer.from(id, 'base64').toString('utf8'));
-          sharedRootPath = normalizeRelativePath(decodedPath);
-          meta = await FileMetaModel.findByPath(sharedRootPath);
-        } catch (e) {}
-      }
-
-      if (!meta || !meta.is_public) {
+      const sharedTarget = await resolveSharedTarget(id);
+      if (!sharedTarget) {
         return reply.code(404).send({ error: '分享文件不存在' });
       }
+
+      const { meta, sharedRootPath } = sharedTarget;
 
       if (meta.access_password && meta.access_password !== password) {
         return reply.code(403).send({ error: '密码错误' });
       }
 
-      const finalRelPath = normalizeRelativePath(path.posix.join(sharedRootPath, p));
+      const finalRelPath = buildCurrentRelativePath(sharedRootPath, p);
 
       // 安全校验：路径段级别判断
       if (!isWithinSharedRoot(finalRelPath, sharedRootPath)) {
@@ -146,10 +187,20 @@ export default async function shareRoutes(fastify: FastifyInstance) {
       const name = path.basename(targetPath);
       const stream = fs.createReadStream(targetPath);
 
-      reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(name)}"`);
+      reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(name)}"; filename*=UTF-8''${encodeURIComponent(name)}`);
       return reply.send(stream);
     } catch (e: any) {
       reply.code(400).send({ error: e.message });
     }
+  };
+
+  // 下载分享文件
+  fastify.get('/:id/download', async (request, reply) => {
+    return downloadSharedFile(request, reply, request.query as any);
+  });
+
+  // 兼容前端使用 JSON Body 发起下载请求
+  fastify.post('/:id/download', async (request, reply) => {
+    return downloadSharedFile(request, reply, request.body as any);
   });
 }

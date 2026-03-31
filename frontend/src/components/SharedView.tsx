@@ -24,10 +24,12 @@ export function SharedView() {
     fetchShared();
   }, []);
 
-  const handleCopy = (path: string) => {
-    const url = `${window.location.origin}/share/${btoa(encodeURIComponent(path))}`;
+  const getShareToken = (file: any) => file.share_id || btoa(encodeURIComponent(file.relative_path));
+
+  const handleCopy = (file: any) => {
+    const url = `${window.location.origin}/share/${getShareToken(file)}`;
     navigator.clipboard.writeText(url);
-    setCopiedId(path);
+    setCopiedId(file.relative_path);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
@@ -74,14 +76,14 @@ export function SharedView() {
                </div>
                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button 
-                    onClick={() => handleCopy(file.relative_path)}
+                    onClick={() => handleCopy(file)}
                     className="p-2 hover:bg-indigo-50 text-indigo-600 rounded-lg transition"
                     title="复制分享链接"
                    >
                     {copiedId === file.relative_path ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
                   </button>
                   <a 
-                    href={`/share/${btoa(encodeURIComponent(file.relative_path))}`} 
+                    href={`/share/${getShareToken(file)}`} 
                     target="_blank" 
                     className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg transition"
                     title="预览分享页"

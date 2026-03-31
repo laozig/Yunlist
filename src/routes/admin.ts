@@ -7,6 +7,19 @@ import { FileMetaModel } from '../models/fileMeta';
 import { config } from '../config';
 import fastifyMultipart from '@fastify/multipart';
 
+function normalizeIncomingPath(rawPath: unknown): string {
+  if (typeof rawPath !== 'string') return '';
+
+  const trimmed = rawPath.trim();
+  if (!trimmed || trimmed === '/' || trimmed === '.') return '';
+
+  try {
+    return normalizeRelativePath(decodeURIComponent(trimmed));
+  } catch {
+    return normalizeRelativePath(trimmed);
+  }
+}
+
 export default async function adminRoutes(fastify: FastifyInstance) {
   // 注册 multipart 插件，以支持文件上传解析
   fastify.register(fastifyMultipart, {
@@ -81,18 +94,27 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   // 3. 删除文件或文件夹
   fastify.delete('/files', async (request, reply) => {
-    const { filePath: rawPath } = request.query as any;
-    const filePath = normalizeRelativePath(rawPath);
+    const query = (request.query as any) ?? {};
+    const body = (request.body as any) ?? {};
+    const rawPath = body.filePath ?? query.filePath;
+    const filePath = normalizeIncomingPath(rawPath);
     if (!filePath && rawPath !== '' && rawPath !== '/') return reply.code(400).send({ error: 'filePath is required' });
 
     try {
        const targetPath = getSecureFilePath(filePath);
 
        if (fs.existsSync(targetPath)) {
-         if (fs.statSync(targetPath).isDirectory()) {
-           fs.rmSync(targetPath, { recursive: true, force: true });
+         const stat = await fs.promises.lstat(targetPath);
+
+         if (stat.isDirectory()) {
+           await fs.promises.rm(targetPath, {
+             recursive: true,
+             force: true,
+             maxRetries: 3,
+             retryDelay: 100,
+           });
          } else {
-           fs.unlinkSync(targetPath);
+           await fs.promises.unlink(targetPath);
          }
        }
 
@@ -100,6 +122,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
        return { success: true };
     } catch (e: any) {
+      request.log.error({ err: e, rawPath, filePath }, '删除文件或文件夹失败');
       reply.code(400).send({ error: e.message });
     }
   });
@@ -111,8 +134,16 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     try {
       const absoluteTarget = getSecureFilePath(relativePath);
+      const targetExists = fs.existsSync(absoluteTarget);
 
-      if (!fs.existsSync(absoluteTarget)) {
+      if (!targetExists) {
+         // 兼容“物理文件已被删，但数据库里还残留分享记录”的情况：
+         // 当请求是在关闭公开分享时，直接清理掉残留元数据，避免前端一直看到脏数据。
+         if (isPublic === false) {
+           await FileMetaModel.deleteByPath(relativePath);
+           return { success: true, cleanedStaleMeta: true };
+         }
+
          return reply.code(404).send({ error: 'Target physical file does not exist' });
       }
 
@@ -134,7 +165,23 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // 5. 获取所有已分享文件清单
   fastify.get('/shared', async () => {
     const sharedFiles = await FileMetaModel.findAllShared();
-    return { files: sharedFiles };
+
+    const existingFiles = await Promise.all(sharedFiles.map(async (file) => {
+      try {
+        const absoluteTarget = getSecureFilePath(file.relative_path);
+        if (!fs.existsSync(absoluteTarget)) {
+          await FileMetaModel.deleteByPath(file.relative_path);
+          return null;
+        }
+
+        return file;
+      } catch {
+        await FileMetaModel.deleteByPath(file.relative_path);
+        return null;
+      }
+    }));
+
+    return { files: existingFiles.filter(Boolean) };
   });
 
   // 6. 获取系统运行状态

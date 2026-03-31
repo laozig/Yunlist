@@ -1,6 +1,5 @@
 import Fastify from 'fastify';
 import fastifyJwt from '@fastify/jwt';
-import fastifyStatic from '@fastify/static';
 import { config } from './config';
 import { initDB } from './db';
 import adminRoutes from './routes/admin';
@@ -11,12 +10,6 @@ const fastify = Fastify({ logger: true });
 // 注册 JWT 插件用于轻量级鉴权
 fastify.register(fastifyJwt, {
   secret: config.jwtSecret
-});
-
-// 挂载静态代理：后端直接读取和管理服务器上的某个指定本地目录
-fastify.register(fastifyStatic, {
-  root: config.filesRoot,
-  prefix: '/storage/', // 本地真实文件访问路由前缀 /storage/...
 });
 
 import { FileMetaModel } from './models/fileMeta';

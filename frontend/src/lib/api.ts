@@ -10,7 +10,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
+  if (!headers.has('Content-Type') && !(options.body instanceof FormData) && options.body !== undefined) {
     headers.set('Content-Type', 'application/json');
   }
 
@@ -36,40 +36,40 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const api = {
-  login: (password: string) => 
-    request<{token: string}>('/api/login', { 
-      method: 'POST', 
-      body: JSON.stringify({ password }) 
+  login: (password: string) =>
+    request<{token: string}>('/api/login', {
+      method: 'POST',
+      body: JSON.stringify({ password })
     }),
-    
-  getFiles: (dirPath: string = '') => 
+
+  getFiles: (dirPath: string = '') =>
     request<{files: any[] }>(`/api/admin/files?dirPath=${encodeURIComponent(dirPath)}`),
-    
+
   mkdir: (dirPath: string, name: string) =>
     request<{success: boolean}>('/api/admin/mkdir', {
       method: 'POST',
       body: JSON.stringify({ dirPath, name })
     }),
-    
+
   uploadFile: (dirPath: string, file: File) => {
     const formData = new FormData();
     formData.append('dirPath', dirPath);
     formData.append('file', file);
     return request<{success: boolean, relativePath: string}>('/api/admin/upload', {
       method: 'POST',
-      body: formData // 省略 Content-Type 自动设定 multipart
+      body: formData
     });
   },
 
-  deleteFile: (filePath: string) => 
-    request<{success: boolean}>('/api/admin/files', { 
-      method: 'DELETE', 
-      body: JSON.stringify({ filePath }) 
+  deleteFile: (filePath: string) =>
+    request<{success: boolean}>('/api/admin/files', {
+      method: 'DELETE',
+      body: JSON.stringify({ filePath }),
     }),
 
-  updateMeta: (data: { relativePath: string, title?: string | null, description?: string | null, isPublic?: boolean, accessPassword?: string | null, shareId?: string | null }) => 
-    request<{success: boolean}>('/api/admin/meta', { 
-      method: 'PUT', 
+  updateMeta: (data: { relativePath: string, title?: string | null, description?: string | null, isPublic?: boolean, accessPassword?: string | null, shareId?: string | null }) =>
+    request<{success: boolean}>('/api/admin/meta', {
+      method: 'PUT',
       body: JSON.stringify({
         relativePath: data.relativePath,
         title: data.title,
@@ -77,19 +77,19 @@ export const api = {
         isPublic: data.isPublic,
         accessPassword: data.accessPassword || null,
         shareId: data.shareId || null,
-      }) 
+      })
     }),
 
-  getSharedFiles: () => 
+  getSharedFiles: () =>
     request<{files: any[]}>('/api/admin/shared'),
 
-  getSystemStats: () => 
+  getSystemStats: () =>
     request<any>('/api/admin/system-stats'),
 
-  getStats: () => 
+  getStats: () =>
     request<{ dashboard: any[], hotFiles: any[] }>('/api/admin/stats'),
 
-  updateAdminPassword: (oldPassword: string, newPassword: string) => 
+  updateAdminPassword: (oldPassword: string, newPassword: string) =>
     request<{success: boolean}>('/api/admin/password', {
       method: 'PUT',
       body: JSON.stringify({ oldPassword, newPassword })

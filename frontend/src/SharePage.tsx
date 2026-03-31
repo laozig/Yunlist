@@ -27,6 +27,29 @@ interface ShareInfo {
   updated_at?: string;
 }
 
+function normalizeShareInfo(payload: any): ShareInfo {
+  const file = payload?.file ?? {};
+  const meta = payload?.meta ?? {};
+  const children = (payload?.children ?? file?.children ?? []).map((child: any) => ({
+    ...child,
+    relPath: child.relPath ?? child.relativePath ?? '',
+    updated_at: child.updated_at ?? new Date().toISOString(),
+  }));
+
+  return {
+    id: payload?.id ?? meta?.share_id ?? '',
+    name: payload?.name ?? file?.name ?? '',
+    size: payload?.size ?? file?.size ?? 0,
+    isDirectory: payload?.isDirectory ?? file?.isDirectory ?? false,
+    children,
+    currentPath: payload?.currentPath ?? '',
+    title: payload?.title ?? meta?.title ?? null,
+    description: payload?.description ?? meta?.description ?? null,
+    needsPassword: payload?.needsPassword ?? !!meta?.access_password,
+    updated_at: payload?.updated_at,
+  };
+}
+
 export function SharePage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -49,10 +72,13 @@ export function SharePage() {
     if (!id) return;
     setLoading(true);
     fetch(`/api/share/${id}?p=${encodeURIComponent(subPath)}`)
-      .then(res => res.json())
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || '加载分享信息失败');
+        return data;
+      })
       .then(data => {
-        if (data.error) throw new Error(data.error);
-        setInfo(data);
+        setInfo(normalizeShareInfo(data));
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
@@ -63,7 +89,7 @@ export function SharePage() {
     if (!fileToDownload && info?.isDirectory && !targetFile) return;
 
     const finalTarget = fileToDownload || targetFile || null;
-    const downloadPath = finalTarget ? finalTarget.relPath : '';
+    const downloadPath = finalTarget ? finalTarget.relPath : (!info?.isDirectory ? info?.currentPath || '' : '');
 
     if (info?.needsPassword && !password) {
       if (finalTarget) setTargetFile(finalTarget);
