@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Download, Lock, File, FileText, FileBadge, ChevronRight, Home, ArrowLeft } from 'lucide-react';
+import { Download, Lock, FileBadge, ChevronRight, Home, ArrowLeft } from 'lucide-react';
 import { cn } from './lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -25,6 +25,13 @@ interface ShareInfo {
   description?: string | null;
   needsPassword?: boolean;
   updated_at?: string;
+  expiresAt?: string | null;
+  maxViews?: number | null;
+  maxDownloads?: number | null;
+  views?: number;
+  downloads?: number;
+  remainingViews?: number | null;
+  remainingDownloads?: number | null;
 }
 
 function normalizeShareInfo(payload: any): ShareInfo {
@@ -47,6 +54,13 @@ function normalizeShareInfo(payload: any): ShareInfo {
     description: payload?.description ?? meta?.description ?? null,
     needsPassword: payload?.needsPassword ?? !!meta?.access_password,
     updated_at: payload?.updated_at,
+    expiresAt: payload?.expiresAt ?? null,
+    maxViews: payload?.maxViews ?? null,
+    maxDownloads: payload?.maxDownloads ?? null,
+    views: payload?.views ?? 0,
+    downloads: payload?.downloads ?? 0,
+    remainingViews: payload?.remainingViews ?? null,
+    remainingDownloads: payload?.remainingDownloads ?? null,
   };
 }
 
@@ -64,9 +78,17 @@ export function SharePage() {
   const [password, setPassword] = useState('');
   const [downloadError, setDownloadError] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'file' | 'archive'>('file');
   
   // 当前选中的待下载文件 (针对文件夹中的单个文件)
   const [targetFile, setTargetFile] = useState<ShareChild | null>(null);
+
+  const closePasswordModal = () => {
+    setShowPasswordModal(false);
+    setTargetFile(null);
+    setPendingAction('file');
+    setDownloadError('');
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -93,6 +115,7 @@ export function SharePage() {
 
     if (info?.needsPassword && !password) {
       if (finalTarget) setTargetFile(finalTarget);
+      setPendingAction('file');
       setShowPasswordModal(true);
       return;
     }
@@ -134,6 +157,64 @@ export function SharePage() {
       setShowPasswordModal(false);
       setPassword('');
       setTargetFile(null);
+      setPendingAction('file');
+    } catch (err: any) {
+      setDownloadError(err.message);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleArchiveDownload = async () => {
+    if (!info) return;
+
+    if (info.needsPassword && !password) {
+      setTargetFile(null);
+      setPendingAction('archive');
+      setShowPasswordModal(true);
+      return;
+    }
+
+    setIsDownloading(true);
+    setDownloadError('');
+    try {
+      const res = await fetch(`/api/share/${id}/archive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password: password || undefined,
+          p: info.currentPath || ''
+        })
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to download archive');
+      }
+
+      const contentDisposition = res.headers.get('Content-Disposition');
+      let filename = `${info.name}.zip`;
+      if (contentDisposition) {
+        const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+        const fallbackMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+        if (utf8Match?.[1]) filename = decodeURIComponent(utf8Match[1]);
+        else if (fallbackMatch?.[1]) filename = decodeURIComponent(fallbackMatch[1]);
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+
+      setShowPasswordModal(false);
+      setPassword('');
+      setTargetFile(null);
+      setPendingAction('file');
     } catch (err: any) {
       setDownloadError(err.message);
     } finally {
@@ -222,6 +303,24 @@ export function SharePage() {
 
       {/* 中心内容区 */}
       <main className="max-w-4xl mx-auto px-6 lg:px-8 py-8 md:py-12 flex flex-col">
+         <div className="mb-8 flex flex-wrap gap-3">
+            {info.expiresAt && (
+              <div className="px-4 py-2 rounded-2xl bg-rose-50 text-rose-600 text-sm font-semibold border border-rose-100">
+                分享有效期至 {formatDistanceToNow(new Date(info.expiresAt), { addSuffix: true })}
+              </div>
+            )}
+            {info.maxViews != null && (
+              <div className="px-4 py-2 rounded-2xl bg-sky-50 text-sky-600 text-sm font-semibold border border-sky-100">
+                访问 {info.views ?? 0} / {info.maxViews} {info.remainingViews != null ? `（剩余 ${info.remainingViews}）` : ''}
+              </div>
+            )}
+            {info.maxDownloads != null && (
+              <div className="px-4 py-2 rounded-2xl bg-emerald-50 text-emerald-700 text-sm font-semibold border border-emerald-100">
+                下载 {info.downloads ?? 0} / {info.maxDownloads} {info.remainingDownloads != null ? `（剩余 ${info.remainingDownloads}）` : ''}
+              </div>
+            )}
+         </div>
+
          {/* 描述信息 (仅在根目录显示) */}
          {!subPath && info.description && (
             <article className="prose prose-slate prose-lg max-w-none mb-12 bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
@@ -308,8 +407,18 @@ export function SharePage() {
               </button>
             )}
             {info.isDirectory && (
-               <div className="px-4 py-2 text-[10px] font-bold text-indigo-500 bg-indigo-50 rounded-lg max-w-[120px] text-center leading-tight">
-                 点击列表项目<br/>直接漫游分享
+               <div className="flex items-center gap-2 pr-2">
+                 <button
+                   onClick={handleArchiveDownload}
+                   disabled={isDownloading}
+                   className="group shrink-0 relative bg-emerald-600 text-white font-semibold flex items-center justify-center gap-2 h-14 px-6 rounded-xl shadow-md hover:bg-emerald-700 transition-all active:scale-95 disabled:opacity-50"
+                 >
+                   {isDownloading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Download className="w-5 h-5" />}
+                   <span className="hidden sm:inline">打包下载</span>
+                 </button>
+                 <div className="px-4 py-2 text-[10px] font-bold text-indigo-500 bg-indigo-50 rounded-lg max-w-[120px] text-center leading-tight">
+                   点击列表项目<br/>直接漫游分享
+                 </div>
                </div>
             )}
          </div>
@@ -318,7 +427,7 @@ export function SharePage() {
       {/* 密码模态框 */}
       {showPasswordModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => !isDownloading && setShowPasswordModal(false)} />
+           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => !isDownloading && closePasswordModal()} />
            
            <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 animate-in fade-in zoom-in-95 duration-200">
               <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-500 flex items-center justify-center mb-6">
@@ -340,19 +449,23 @@ export function SharePage() {
                 onChange={e => setPassword(e.target.value)}
                 placeholder="输入密码..."
                 className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 outline-none transition-all duration-200 text-center font-bold tracking-widest"
-                onKeyDown={e => { if (e.key === 'Enter' && password) handleDownload(); }}
+                onKeyDown={e => { 
+                  if (e.key === 'Enter' && password) {
+                    pendingAction === 'archive' ? handleArchiveDownload() : handleDownload();
+                  }
+                }}
               />
 
               <div className="flex gap-3 mt-8">
                 <button 
-                  onClick={() => { setShowPasswordModal(false); setTargetFile(null); }}
+                  onClick={closePasswordModal}
                   disabled={isDownloading}
                   className="flex-1 h-12 rounded-xl font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition"
                 >
                   取消
                 </button>
                 <button 
-                  onClick={() => handleDownload()}
+                  onClick={() => pendingAction === 'archive' ? handleArchiveDownload() : handleDownload()}
                   disabled={!password || isDownloading}
                   className="flex-1 h-12 rounded-xl font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition flex items-center justify-center gap-2"
                 >

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Save, Info, File as FileIcon, Check, Copy, Zap, FolderOpen } from 'lucide-react';
+import { X, Save, Info, File as FileIcon, Check, Copy, Zap, FolderOpen, Download } from 'lucide-react';
 import { type FileItem } from './FileList';
 import { cn } from '../lib/utils';
-import { api } from '../lib/api';
+import { api, triggerBlobDownload } from '../lib/api';
 import { format } from 'date-fns';
 
 interface FileDetailPanelProps {
@@ -18,8 +18,32 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
   const [accessPassword, setAccessPassword] = useState('');
   const [isPublic, setIsPublic] = useState(false);
   const [shareId, setShareId] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
+  const [maxViews, setMaxViews] = useState('');
+  const [maxDownloads, setMaxDownloads] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [isArchiveDownloading, setIsArchiveDownloading] = useState(false);
+
+  const toDatetimeLocal = (value?: string | null) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+    return local.toISOString().slice(0, 16);
+  };
+
+  const parseLimitValue = (value: string, label: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const parsed = Number(trimmed);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      throw new Error(`${label}必须是大于等于 0 的整数`);
+    }
+
+    return parsed;
+  };
 
   useEffect(() => {
     if (file) {
@@ -28,6 +52,9 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
       setIsPublic(file.metaInfo?.is_public || false);
       setAccessPassword(file.metaInfo?.access_password || '');
       setShareId(file.metaInfo?.share_id || '');
+      setExpiresAt(toDatetimeLocal(file.metaInfo?.expires_at));
+      setMaxViews(file.metaInfo?.max_views == null ? '' : String(file.metaInfo.max_views));
+      setMaxDownloads(file.metaInfo?.max_downloads == null ? '' : String(file.metaInfo.max_downloads));
     }
   }, [file]);
 
@@ -36,6 +63,9 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      const parsedMaxViews = parseLimitValue(maxViews, '访问次数上限');
+      const parsedMaxDownloads = parseLimitValue(maxDownloads, '下载次数上限');
+
       await api.updateMeta({
         relativePath: file.relativePath,
         title,
@@ -43,12 +73,27 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
         isPublic,
         accessPassword: accessPassword || null,
         shareId: shareId || null,
+        expiresAt: expiresAt || null,
+        maxViews: parsedMaxViews,
+        maxDownloads: parsedMaxDownloads,
       });
       onClose();
     } catch (err: any) {
       alert(err.message || '保存失败');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleArchiveDownload = async () => {
+    setIsArchiveDownloading(true);
+    try {
+      const response = await api.downloadArchive(file.relativePath, file.name);
+      triggerBlobDownload(response.blob, response.filename);
+    } catch (err: any) {
+      alert(err.message || '打包下载失败');
+    } finally {
+      setIsArchiveDownloading(false);
     }
   };
 
@@ -126,13 +171,35 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
                 </div>
 
                 {file.isDirectory && onFolderOpen && (
-                   <button 
-                     onClick={() => onFolderOpen(file)}
-                     className="w-full h-10 rounded-xl bg-white text-indigo-600 text-xs font-bold border border-indigo-100 shadow-sm hover:shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 relative z-10 hover:bg-indigo-50"
-                   >
-                     <FolderOpen className="w-3.5 h-3.5" />
-                     打开此文件夹
-                   </button>
+                   <div className="w-full grid grid-cols-2 gap-2">
+                     <button 
+                       onClick={() => onFolderOpen(file)}
+                       className="h-10 rounded-xl bg-white text-indigo-600 text-xs font-bold border border-indigo-100 shadow-sm hover:shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 relative z-10 hover:bg-indigo-50"
+                     >
+                       <FolderOpen className="w-3.5 h-3.5" />
+                       打开此文件夹
+                     </button>
+
+                     <button 
+                       onClick={handleArchiveDownload}
+                       disabled={isArchiveDownloading}
+                       className="h-10 rounded-xl bg-white text-emerald-600 text-xs font-bold border border-emerald-100 shadow-sm hover:shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 relative z-10 hover:bg-emerald-50 disabled:opacity-50"
+                     >
+                       {isArchiveDownloading ? <div className="w-3.5 h-3.5 border-2 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                       打包下载
+                     </button>
+                   </div>
+                )}
+
+                {!file.isDirectory && (
+                  <button 
+                    onClick={handleArchiveDownload}
+                    disabled={isArchiveDownloading}
+                    className="w-full h-10 rounded-xl bg-white text-emerald-600 text-xs font-bold border border-emerald-100 shadow-sm hover:shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 relative z-10 hover:bg-emerald-50 disabled:opacity-50"
+                  >
+                    {isArchiveDownloading ? <div className="w-3.5 h-3.5 border-2 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    导出压缩包
+                  </button>
                 )}
               </div>
 
@@ -244,6 +311,59 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
                             placeholder="留空则不设密码"
                             className="w-full px-4 py-2.5 bg-white border border-gray-200 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100 transition-all duration-200 rounded-xl outline-none text-sm font-medium"
                           />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold uppercase tracking-wider text-gray-400 ml-1">
+                            分享过期时间 (可选)
+                          </label>
+                          <input
+                            type="datetime-local"
+                            value={expiresAt}
+                            onChange={e => setExpiresAt(e.target.value)}
+                            className="w-full px-4 py-2.5 bg-white border border-gray-200 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100 transition-all duration-200 rounded-xl outline-none text-sm font-medium"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold uppercase tracking-wider text-gray-400 ml-1">
+                              最大访问次数
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              value={maxViews}
+                              onChange={e => setMaxViews(e.target.value)}
+                              placeholder="留空不限"
+                              className="w-full px-4 py-2.5 bg-white border border-gray-200 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100 transition-all duration-200 rounded-xl outline-none text-sm font-medium"
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold uppercase tracking-wider text-gray-400 ml-1">
+                              最大下载次数
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              value={maxDownloads}
+                              onChange={e => setMaxDownloads(e.target.value)}
+                              placeholder="留空不限"
+                              className="w-full px-4 py-2.5 bg-white border border-gray-200 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100 transition-all duration-200 rounded-xl outline-none text-sm font-medium"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 text-xs font-medium text-gray-500 bg-white rounded-2xl border border-gray-100 p-4">
+                          <div>
+                            <p className="text-gray-400 uppercase tracking-wider text-[10px] mb-1">累计访问</p>
+                            <p className="text-base font-bold text-gray-700">{file.metaInfo?.views ?? 0}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-400 uppercase tracking-wider text-[10px] mb-1">累计下载</p>
+                            <p className="text-base font-bold text-gray-700">{file.metaInfo?.downloads ?? 0}</p>
+                          </div>
                         </div>
                      </div>
                   </motion.div>

@@ -27,8 +27,12 @@ function App() {
     setIsLoading(true);
     try {
       const res = await api.getFiles(dir);
-      // @ts-ignore
-      setFiles(res.files.map((f: any) => ({ ...f, id: f.relativePath })));
+      const normalizedFiles = res.files.map((f: any) => ({ ...f, id: f.relativePath })) as FileItem[];
+      setFiles(normalizedFiles);
+
+      if (selectedFile && !normalizedFiles.some(file => file.relativePath === selectedFile.relativePath)) {
+        setSelectedFile(null);
+      }
     } catch (err: any) {
       console.error(err);
       if (err.status !== 401) {

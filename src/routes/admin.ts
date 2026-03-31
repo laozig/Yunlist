@@ -6,6 +6,7 @@ import { getSecureFilePath, normalizeRelativePath } from '../utils/pathUtils';
 import { FileMetaModel } from '../models/fileMeta';
 import { config } from '../config';
 import fastifyMultipart from '@fastify/multipart';
+import { sendArchiveReply } from '../utils/archive';
 
 function normalizeIncomingPath(rawPath: unknown): string {
   if (typeof rawPath !== 'string') return '';
@@ -18,6 +19,84 @@ function normalizeIncomingPath(rawPath: unknown): string {
   } catch {
     return normalizeRelativePath(trimmed);
   }
+}
+
+function normalizeIncomingPaths(rawPaths: unknown): string[] {
+  if (!Array.isArray(rawPaths)) return [];
+  return Array.from(new Set(rawPaths.map(normalizeIncomingPath).filter(Boolean)));
+}
+
+function pruneNestedPaths(paths: string[]): string[] {
+  const sorted = [...paths].sort((a, b) => a.length - b.length);
+  return sorted.filter((candidate, index) => {
+    return !sorted.some((parent, parentIndex) => {
+      if (parentIndex === index) return false;
+      return candidate.startsWith(parent + '/');
+    });
+  });
+}
+
+function parseNullableInteger(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error('次数限制必须是大于等于 0 的整数');
+  }
+
+  return parsed;
+}
+
+function parseNullableDate(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    throw new Error('过期时间格式不正确');
+  }
+
+  return date.toISOString();
+}
+
+function hasOwnProperty(target: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(target, key);
+}
+
+function getParentRelativePath(relativePath: string): string {
+  const parentPath = path.posix.dirname(relativePath);
+  return parentPath === '.' ? '' : normalizeRelativePath(parentPath);
+}
+
+function buildDestinationPath(sourcePath: string, destinationDir: string): string {
+  return normalizeRelativePath(path.posix.join(destinationDir, path.posix.basename(sourcePath)));
+}
+
+function isSubPath(candidate: string, rootPath: string): boolean {
+  if (!rootPath) return true;
+  return candidate === rootPath || candidate.startsWith(rootPath + '/');
+}
+
+async function deleteManagedPath(relativePath: string) {
+  const targetPath = getSecureFilePath(relativePath);
+
+  if (fs.existsSync(targetPath)) {
+    const stat = await fs.promises.lstat(targetPath);
+
+    if (stat.isDirectory()) {
+      await fs.promises.rm(targetPath, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 100,
+      });
+    } else {
+      await fs.promises.unlink(targetPath);
+    }
+  }
+
+  await FileMetaModel.deleteByPath(relativePath);
 }
 
 export default async function adminRoutes(fastify: FastifyInstance) {
@@ -58,6 +137,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
           isDirectory: dirent.isDirectory(),
           relativePath: relPath,
           size: dirent.isDirectory() ? 0 : fs.statSync(path.join(targetDir, dirent.name)).size,
+          lastModified: fs.statSync(path.join(targetDir, dirent.name)).mtimeMs,
           metaInfo
         };
       }));
@@ -101,24 +181,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     if (!filePath && rawPath !== '' && rawPath !== '/') return reply.code(400).send({ error: 'filePath is required' });
 
     try {
-       const targetPath = getSecureFilePath(filePath);
-
-       if (fs.existsSync(targetPath)) {
-         const stat = await fs.promises.lstat(targetPath);
-
-         if (stat.isDirectory()) {
-           await fs.promises.rm(targetPath, {
-             recursive: true,
-             force: true,
-             maxRetries: 3,
-             retryDelay: 100,
-           });
-         } else {
-           await fs.promises.unlink(targetPath);
-         }
-       }
-
-       await FileMetaModel.deleteByPath(filePath);
+       await deleteManagedPath(filePath);
 
        return { success: true };
     } catch (e: any) {
@@ -129,17 +192,19 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   // 4. 编辑附加信息
   fastify.put('/meta', async (request, reply) => {
-    const { relativePath: rawPath, title, description, isPublic, accessPassword, shareId } = request.body as any;
+    const body = (request.body as any) ?? {};
+    const { relativePath: rawPath } = body;
     const relativePath = normalizeRelativePath(rawPath);
 
     try {
       const absoluteTarget = getSecureFilePath(relativePath);
       const targetExists = fs.existsSync(absoluteTarget);
+      const existingMeta = await FileMetaModel.findByPath(relativePath);
 
       if (!targetExists) {
          // 兼容“物理文件已被删，但数据库里还残留分享记录”的情况：
          // 当请求是在关闭公开分享时，直接清理掉残留元数据，避免前端一直看到脏数据。
-         if (isPublic === false) {
+         if (body.isPublic === false) {
            await FileMetaModel.deleteByPath(relativePath);
            return { success: true, cleanedStaleMeta: true };
          }
@@ -147,13 +212,20 @@ export default async function adminRoutes(fastify: FastifyInstance) {
          return reply.code(404).send({ error: 'Target physical file does not exist' });
       }
 
+      const nextExpiresAt = parseNullableDate(body.expiresAt);
+      const nextMaxViews = parseNullableInteger(body.maxViews);
+      const nextMaxDownloads = parseNullableInteger(body.maxDownloads);
+
       await FileMetaModel.upsert({
         relative_path: relativePath,
-        title,
-        description,
-        is_public: !!isPublic,
-        access_password: accessPassword,
-        share_id: shareId
+        title: hasOwnProperty(body, 'title') ? body.title ?? null : existingMeta?.title ?? null,
+        description: hasOwnProperty(body, 'description') ? body.description ?? null : existingMeta?.description ?? null,
+        is_public: hasOwnProperty(body, 'isPublic') ? !!body.isPublic : existingMeta?.is_public ?? false,
+        access_password: hasOwnProperty(body, 'accessPassword') ? (body.accessPassword || null) : existingMeta?.access_password ?? null,
+        share_id: hasOwnProperty(body, 'shareId') ? (body.shareId || null) : existingMeta?.share_id ?? null,
+        expires_at: nextExpiresAt === undefined ? existingMeta?.expires_at ?? null : nextExpiresAt,
+        max_views: nextMaxViews === undefined ? existingMeta?.max_views ?? null : nextMaxViews,
+        max_downloads: nextMaxDownloads === undefined ? existingMeta?.max_downloads ?? null : nextMaxDownloads,
       });
 
       return { success: true };
@@ -182,6 +254,247 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }));
 
     return { files: existingFiles.filter(Boolean) };
+  });
+
+  // 5.1 批量切换分享状态
+  fastify.post('/batch/share', async (request, reply) => {
+    const { paths: rawPaths, isPublic } = (request.body as any) ?? {};
+    const paths = pruneNestedPaths(normalizeIncomingPaths(rawPaths));
+
+    if (paths.length === 0) {
+      return reply.code(400).send({ error: '至少需要选择一个文件或文件夹' });
+    }
+
+    if (typeof isPublic !== 'boolean') {
+      return reply.code(400).send({ error: 'isPublic 必须为布尔值' });
+    }
+
+    try {
+      const failedPaths: string[] = [];
+
+      for (const relativePath of paths) {
+        const absoluteTarget = getSecureFilePath(relativePath);
+        const exists = fs.existsSync(absoluteTarget);
+
+        if (!exists) {
+          if (!isPublic) {
+            await FileMetaModel.deleteByPath(relativePath);
+            continue;
+          }
+
+          failedPaths.push(relativePath);
+          continue;
+        }
+
+        const existingMeta = await FileMetaModel.findByPath(relativePath);
+        await FileMetaModel.upsert({
+          relative_path: relativePath,
+          title: existingMeta?.title ?? null,
+          description: existingMeta?.description ?? null,
+          is_public: isPublic,
+          access_password: existingMeta?.access_password ?? null,
+          share_id: existingMeta?.share_id ?? null,
+          expires_at: existingMeta?.expires_at ?? null,
+          max_views: existingMeta?.max_views ?? null,
+          max_downloads: existingMeta?.max_downloads ?? null,
+        });
+      }
+
+      if (failedPaths.length > 0) {
+        return reply.code(400).send({ error: `以下路径不存在，无法更新分享状态：${failedPaths.join(', ')}` });
+      }
+
+      return { success: true, count: paths.length };
+    } catch (e: any) {
+      reply.code(400).send({ error: e.message });
+    }
+  });
+
+  // 5.2 批量删除
+  fastify.post('/batch/delete', async (request, reply) => {
+    const paths = pruneNestedPaths(normalizeIncomingPaths((request.body as any)?.paths));
+    if (paths.length === 0) {
+      return reply.code(400).send({ error: '至少需要选择一个文件或文件夹' });
+    }
+
+    try {
+      const sortedPaths = [...paths].sort((a, b) => b.length - a.length);
+      for (const relativePath of sortedPaths) {
+        await deleteManagedPath(relativePath);
+      }
+
+      return { success: true, count: sortedPaths.length };
+    } catch (e: any) {
+      reply.code(400).send({ error: e.message });
+    }
+  });
+
+  // 5.3 重命名文件/文件夹
+  fastify.post('/rename', async (request, reply) => {
+    const { sourcePath: rawSourcePath, newName } = (request.body as any) ?? {};
+    const sourcePath = normalizeIncomingPath(rawSourcePath);
+
+    if (!sourcePath) {
+      return reply.code(400).send({ error: 'sourcePath is required' });
+    }
+
+    const safeNewName = typeof newName === 'string' ? newName.trim() : '';
+    if (!safeNewName || safeNewName.includes('/') || safeNewName.includes('\\')) {
+      return reply.code(400).send({ error: 'newName 非法，不能包含路径分隔符' });
+    }
+
+    const destinationPath = normalizeRelativePath(path.posix.join(getParentRelativePath(sourcePath), safeNewName));
+    if (!destinationPath || destinationPath === sourcePath) {
+      return { success: true, relativePath: sourcePath };
+    }
+
+    try {
+      const sourceAbsolutePath = getSecureFilePath(sourcePath);
+      const destinationAbsolutePath = getSecureFilePath(destinationPath);
+
+      if (!fs.existsSync(sourceAbsolutePath)) {
+        return reply.code(404).send({ error: '源文件或文件夹不存在' });
+      }
+
+      if (fs.existsSync(destinationAbsolutePath)) {
+        return reply.code(400).send({ error: '目标名称已存在' });
+      }
+
+      await FileMetaModel.deleteByPath(destinationPath);
+      await fs.promises.rename(sourceAbsolutePath, destinationAbsolutePath);
+      await FileMetaModel.movePathRecords(sourcePath, destinationPath);
+
+      return { success: true, relativePath: destinationPath };
+    } catch (e: any) {
+      reply.code(400).send({ error: e.message });
+    }
+  });
+
+  // 5.4 移动文件/文件夹
+  fastify.post('/move', async (request, reply) => {
+    const body = (request.body as any) ?? {};
+    const sourcePaths = pruneNestedPaths(normalizeIncomingPaths(body.sourcePaths));
+    const destinationDir = normalizeIncomingPath(body.destinationDir);
+
+    if (sourcePaths.length === 0) {
+      return reply.code(400).send({ error: '至少需要选择一个文件或文件夹' });
+    }
+
+    try {
+      const destinationAbsoluteDir = getSecureFilePath(destinationDir);
+      if (!fs.existsSync(destinationAbsoluteDir) || !fs.statSync(destinationAbsoluteDir).isDirectory()) {
+        return reply.code(404).send({ error: '目标目录不存在' });
+      }
+
+      const plannedPaths = new Set<string>();
+      for (const sourcePath of sourcePaths) {
+        if (!sourcePath) {
+          return reply.code(400).send({ error: '不支持移动根目录' });
+        }
+
+        const destinationPath = buildDestinationPath(sourcePath, destinationDir);
+        if (isSubPath(destinationDir, sourcePath)) {
+          return reply.code(400).send({ error: `不能把文件夹移动到其自身内部：${sourcePath}` });
+        }
+
+        if (plannedPaths.has(destinationPath)) {
+          return reply.code(400).send({ error: `存在重复目标路径：${destinationPath}` });
+        }
+        plannedPaths.add(destinationPath);
+
+        const destinationAbsolutePath = getSecureFilePath(destinationPath);
+        if (fs.existsSync(destinationAbsolutePath) && destinationPath !== sourcePath) {
+          return reply.code(400).send({ error: `目标已存在：${destinationPath}` });
+        }
+      }
+
+      const moved: string[] = [];
+      for (const sourcePath of sourcePaths) {
+        const destinationPath = buildDestinationPath(sourcePath, destinationDir);
+        if (destinationPath === sourcePath) continue;
+
+        await FileMetaModel.deleteByPath(destinationPath);
+        await fs.promises.rename(getSecureFilePath(sourcePath), getSecureFilePath(destinationPath));
+        await FileMetaModel.movePathRecords(sourcePath, destinationPath);
+        moved.push(destinationPath);
+      }
+
+      return { success: true, moved };
+    } catch (e: any) {
+      reply.code(400).send({ error: e.message });
+    }
+  });
+
+  // 5.5 复制文件/文件夹
+  fastify.post('/copy', async (request, reply) => {
+    const body = (request.body as any) ?? {};
+    const sourcePaths = pruneNestedPaths(normalizeIncomingPaths(body.sourcePaths));
+    const destinationDir = normalizeIncomingPath(body.destinationDir);
+
+    if (sourcePaths.length === 0) {
+      return reply.code(400).send({ error: '至少需要选择一个文件或文件夹' });
+    }
+
+    try {
+      const destinationAbsoluteDir = getSecureFilePath(destinationDir);
+      if (!fs.existsSync(destinationAbsoluteDir) || !fs.statSync(destinationAbsoluteDir).isDirectory()) {
+        return reply.code(404).send({ error: '目标目录不存在' });
+      }
+
+      const plannedPaths = new Set<string>();
+      for (const sourcePath of sourcePaths) {
+        const destinationPath = buildDestinationPath(sourcePath, destinationDir);
+        if (isSubPath(destinationDir, sourcePath)) {
+          return reply.code(400).send({ error: `不能复制到其自身内部：${sourcePath}` });
+        }
+
+        if (plannedPaths.has(destinationPath)) {
+          return reply.code(400).send({ error: `存在重复目标路径：${destinationPath}` });
+        }
+        plannedPaths.add(destinationPath);
+
+        const destinationAbsolutePath = getSecureFilePath(destinationPath);
+        if (fs.existsSync(destinationAbsolutePath)) {
+          return reply.code(400).send({ error: `目标已存在：${destinationPath}` });
+        }
+      }
+
+      const copied: string[] = [];
+      for (const sourcePath of sourcePaths) {
+        const destinationPath = buildDestinationPath(sourcePath, destinationDir);
+        await FileMetaModel.deleteByPath(destinationPath);
+        await fs.promises.cp(getSecureFilePath(sourcePath), getSecureFilePath(destinationPath), {
+          recursive: true,
+          errorOnExist: true,
+          force: false,
+        });
+        await FileMetaModel.clonePathRecords(sourcePath, destinationPath);
+        copied.push(destinationPath);
+      }
+
+      return { success: true, copied };
+    } catch (e: any) {
+      reply.code(400).send({ error: e.message });
+    }
+  });
+
+  // 5.6 管理端打包下载
+  fastify.post('/archive', async (request, reply) => {
+    const filePath = normalizeIncomingPath((request.body as any)?.filePath);
+    if (!filePath) {
+      return reply.code(400).send({ error: 'filePath is required' });
+    }
+
+    try {
+      const targetPath = getSecureFilePath(filePath);
+      if (!fs.existsSync(targetPath)) {
+        return reply.code(404).send({ error: '文件或文件夹不存在' });
+      }
+
+      return await sendArchiveReply(reply, targetPath);
+    } catch (e: any) {
+      reply.code(400).send({ error: e.message });
+    }
   });
 
   // 6. 获取系统运行状态

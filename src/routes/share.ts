@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { getSecureFilePath, normalizeRelativePath } from '../utils/pathUtils';
 import { FileMetaModel, type FileMeta } from '../models/fileMeta';
+import { sendArchiveReply } from '../utils/archive';
 
 /** 判断 childPath 是否在 parentPath 范围内（路径段级别，不是字符串前缀） */
 function isWithinSharedRoot(childPath: string, parentPath: string): boolean {
@@ -54,6 +55,43 @@ function buildCurrentRelativePath(sharedRootPath: string, requestedPath: string)
   return normalizeRelativePath(path.posix.join(sharedRootPath, subPath));
 }
 
+function getShareAccessState(meta: FileMeta) {
+  const views = meta.views ?? 0;
+  const downloads = meta.downloads ?? 0;
+  const isExpired = !!meta.expires_at && new Date(meta.expires_at).getTime() <= Date.now();
+  const viewLimitReached = meta.max_views != null && views >= meta.max_views;
+  const downloadLimitReached = meta.max_downloads != null && downloads >= meta.max_downloads;
+
+  return {
+    isExpired,
+    viewLimitReached,
+    downloadLimitReached,
+    views,
+    downloads,
+    remainingViews: meta.max_views == null ? null : Math.max(meta.max_views - views, 0),
+    remainingDownloads: meta.max_downloads == null ? null : Math.max(meta.max_downloads - downloads, 0),
+  };
+}
+
+function getShareRestrictionMessage(
+  accessState: ReturnType<typeof getShareAccessState>,
+  scope: 'info' | 'download'
+): string | null {
+  if (accessState.isExpired) {
+    return '该分享已过期';
+  }
+
+  if (scope === 'info' && accessState.viewLimitReached) {
+    return '该分享访问次数已达上限';
+  }
+
+  if (scope === 'download' && accessState.downloadLimitReached) {
+    return '该分享下载次数已达上限';
+  }
+
+  return null;
+}
+
 export default async function shareRoutes(fastify: FastifyInstance) {
   // 获取分享文件的公开信息
   fastify.get('/:id', async (request, reply) => {
@@ -67,6 +105,12 @@ export default async function shareRoutes(fastify: FastifyInstance) {
       }
 
       const { meta, sharedRootPath } = sharedTarget;
+      const accessState = getShareAccessState(meta);
+      const restrictionMessage = getShareRestrictionMessage(accessState, 'info');
+      if (restrictionMessage) {
+        return reply.code(410).send({ error: restrictionMessage });
+      }
+
       const currentPath = toShareRelativePath(p, sharedRootPath);
 
       // 构造最终物理路径，支持子路径漫游
@@ -79,6 +123,10 @@ export default async function shareRoutes(fastify: FastifyInstance) {
 
       if (!currentPath) {
         await FileMetaModel.logEvent(sharedRootPath, 'view');
+        accessState.views += 1;
+        if (accessState.remainingViews != null) {
+          accessState.remainingViews = Math.max(accessState.remainingViews - 1, 0);
+        }
       }
 
       const targetPath = getSecureFilePath(currentRelPath);
@@ -115,6 +163,14 @@ export default async function shareRoutes(fastify: FastifyInstance) {
             updated_at: childStat.mtime.toISOString(),
           });
         }
+
+        children.sort((a, b) => {
+          if (a.isDirectory !== b.isDirectory) {
+            return a.isDirectory ? -1 : 1;
+          }
+
+          return a.name.localeCompare(b.name, 'zh-CN');
+        });
       }
 
       return {
@@ -123,6 +179,13 @@ export default async function shareRoutes(fastify: FastifyInstance) {
         description: meta.description,
         needsPassword: !!meta.access_password,
         shareId: meta.share_id ?? null,
+        expiresAt: meta.expires_at ?? null,
+        maxViews: meta.max_views ?? null,
+        maxDownloads: meta.max_downloads ?? null,
+        views: accessState.views,
+        downloads: accessState.downloads,
+        remainingViews: accessState.remainingViews,
+        remainingDownloads: accessState.remainingDownloads,
         meta: {
           title: meta.title,
           description: meta.description,
@@ -161,6 +224,11 @@ export default async function shareRoutes(fastify: FastifyInstance) {
       }
 
       const { meta, sharedRootPath } = sharedTarget;
+      const accessState = getShareAccessState(meta);
+      const restrictionMessage = getShareRestrictionMessage(accessState, 'download');
+      if (restrictionMessage) {
+        return reply.code(410).send({ error: restrictionMessage });
+      }
 
       if (meta.access_password && meta.access_password !== password) {
         return reply.code(403).send({ error: '密码错误' });
@@ -202,5 +270,51 @@ export default async function shareRoutes(fastify: FastifyInstance) {
   // 兼容前端使用 JSON Body 发起下载请求
   fastify.post('/:id/download', async (request, reply) => {
     return downloadSharedFile(request, reply, request.body as any);
+  });
+
+  const archiveSharedFile = async (request: any, reply: any, payload: any) => {
+    const { id } = request.params as any;
+    const { p = '', password = '' } = payload ?? {};
+
+    try {
+      const sharedTarget = await resolveSharedTarget(id);
+      if (!sharedTarget) {
+        return reply.code(404).send({ error: '分享文件不存在' });
+      }
+
+      const { meta, sharedRootPath } = sharedTarget;
+      const accessState = getShareAccessState(meta);
+      const restrictionMessage = getShareRestrictionMessage(accessState, 'download');
+      if (restrictionMessage) {
+        return reply.code(410).send({ error: restrictionMessage });
+      }
+
+      if (meta.access_password && meta.access_password !== password) {
+        return reply.code(403).send({ error: '密码错误' });
+      }
+
+      const finalRelPath = buildCurrentRelativePath(sharedRootPath, p);
+      if (!isWithinSharedRoot(finalRelPath, sharedRootPath)) {
+        return reply.code(403).send({ error: 'Access denied' });
+      }
+
+      const targetPath = getSecureFilePath(finalRelPath);
+      if (!fs.existsSync(targetPath)) {
+        return reply.code(404).send({ error: '物理文件已丢失' });
+      }
+
+      await FileMetaModel.logEvent(sharedRootPath, 'download');
+      return await sendArchiveReply(reply, targetPath);
+    } catch (e: any) {
+      reply.code(400).send({ error: e.message });
+    }
+  };
+
+  fastify.get('/:id/archive', async (request, reply) => {
+    return archiveSharedFile(request, reply, request.query as any);
+  });
+
+  fastify.post('/:id/archive', async (request, reply) => {
+    return archiveSharedFile(request, reply, request.body as any);
   });
 }

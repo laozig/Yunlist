@@ -38,6 +38,24 @@ export const initDB = async (): Promise<Database> => {
       // 字段已存在或其它错误，忽略
     }
 
+    try {
+      await dbInstance.exec('ALTER TABLE files_meta ADD COLUMN expires_at DATETIME');
+    } catch (e) {
+      // 字段已存在或其它错误，忽略
+    }
+
+    try {
+      await dbInstance.exec('ALTER TABLE files_meta ADD COLUMN max_views INTEGER');
+    } catch (e) {
+      // 字段已存在或其它错误，忽略
+    }
+
+    try {
+      await dbInstance.exec('ALTER TABLE files_meta ADD COLUMN max_downloads INTEGER');
+    } catch (e) {
+      // 字段已存在或其它错误，忽略
+    }
+
     // 创建唯一索引以保证 share_id 不重复且查询效率
     try {
       await dbInstance.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_files_meta_share_id ON files_meta(share_id)');
@@ -54,6 +72,8 @@ export const initDB = async (): Promise<Database> => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    await dbInstance.exec('CREATE INDEX IF NOT EXISTS idx_file_events_path_type ON file_events(relative_path, event_type)');
 
     // Create system config table
     await dbInstance.exec(`

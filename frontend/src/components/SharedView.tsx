@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { api } from '../lib/api';
-import { Link2, Trash2, ExternalLink, ShieldCheck, Download, Copy, Check } from 'lucide-react';
+import { api, triggerBlobDownload } from '../lib/api';
+import { Link2, Trash2, ExternalLink, ShieldCheck, Download, Copy, Check, CalendarClock, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 
 export function SharedView() {
@@ -43,6 +43,15 @@ export function SharedView() {
     }
   };
 
+  const handleArchiveDownload = async (file: any) => {
+    try {
+      const response = await api.downloadArchive(file.relative_path, file.title || file.relative_path.split('/').pop());
+      triggerBlobDownload(response.blob, response.filename);
+    } catch (err: any) {
+      alert(err.message || '打包下载失败');
+    }
+  };
+
   if (isLoading) {
     return <div className="flex-1 flex items-center justify-center animate-pulse text-gray-400">正在加载已分享内容...</div>;
   }
@@ -71,10 +80,25 @@ export function SharedView() {
                   <div className="flex items-center gap-3 mt-1 text-xs text-gray-400 font-medium">
                      <span>{file.relative_path}</span>
                      {file.access_password && <span className="flex items-center gap-1 text-amber-500"><ShieldCheck className="w-3 h-3" /> 加密</span>}
+                     {file.expires_at && <span className="flex items-center gap-1 text-rose-500"><CalendarClock className="w-3 h-3" /> 限时</span>}
+                     {file.max_views != null && <span className="flex items-center gap-1 text-sky-500"><Eye className="w-3 h-3" /> 限访问 {file.max_views}</span>}
                      <span>更新于 {file.updated_at ? format(new Date(file.updated_at), 'yyyy-MM-dd HH:mm') : '未知'}</span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 mt-3 text-[11px] font-semibold text-gray-500">
+                    <span className="px-2.5 py-1 rounded-full bg-gray-50 border border-gray-100">访问 {file.views ?? 0}</span>
+                    <span className="px-2.5 py-1 rounded-full bg-gray-50 border border-gray-100">下载 {file.downloads ?? 0}</span>
+                    {file.max_downloads != null && <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">下载上限 {file.max_downloads}</span>}
                   </div>
                </div>
                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => handleArchiveDownload(file)}
+                    className="p-2 hover:bg-emerald-50 text-emerald-600 rounded-lg transition"
+                    title="打包下载"
+                  >
+                    <Download className="w-5 h-5" />
+                  </button>
                   <button 
                     onClick={() => handleCopy(file)}
                     className="p-2 hover:bg-indigo-50 text-indigo-600 rounded-lg transition"
@@ -85,6 +109,7 @@ export function SharedView() {
                   <a 
                     href={`/share/${getShareToken(file)}`} 
                     target="_blank" 
+                    rel="noreferrer"
                     className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg transition"
                     title="预览分享页"
                   >
