@@ -1,11 +1,19 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:22-bookworm-slim AS backend-deps
+FROM node:22-bookworm-slim AS backend-build-base
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV npm_config_build_from_source=true
+ENV PYTHON=/usr/bin/python3
+
+FROM backend-build-base AS backend-deps
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --no-audit --no-fund
 
-FROM node:22-bookworm-slim AS backend-prod-deps
+FROM backend-build-base AS backend-prod-deps
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev --no-audit --no-fund

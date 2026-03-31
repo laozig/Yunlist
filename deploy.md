@@ -310,6 +310,53 @@ docker compose build --no-cache
 docker compose up -d
 ```
 
+### 13.2.2 容器启动后提示 `GLIBC_2.38 not found`（sqlite3 加载失败）
+
+如果你看到类似报错：
+
+```text
+Error: /lib/x86_64-linux-gnu/libm.so.6: version `GLIBC_2.38' not found
+required by /app/node_modules/sqlite3/build/Release/node_sqlite3.node
+```
+
+说明 `sqlite3` 在安装依赖时拿到了一个与当前运行镜像 glibc 版本不兼容的预编译二进制文件。当前仓库最新部署版本已经把 Docker 构建改成：
+
+- 在依赖安装阶段显式安装 `python3 / make / g++`
+- 强制 `sqlite3` 在镜像内 **从源码编译**
+
+你只需要拉取最新代码并重新构建镜像：
+
+```bash
+git pull
+docker compose build --no-cache
+docker compose up -d
+```
+
+如果之前已有异常容器，可以先执行：
+
+```bash
+docker compose down
+docker compose build --no-cache
+docker compose up -d
+```
+
+### 13.2.3 Caddy 提示 `lookup app ... no such host`
+
+如果 Caddy 日志里出现：
+
+```text
+lookup app on 127.0.0.11:53: no such host
+```
+
+这通常不是 Caddy 本身的问题，而是 **`app` 容器没有正常启动 / 正在反复重启**，导致反向代理目标不可用。优先检查：
+
+```bash
+docker compose ps
+docker compose logs -f app
+```
+
+只要 `app` 服务恢复正常，Caddy 就会自动恢复反向代理。
+
 ### 13.3 数据丢失
 
 确认是否正确使用了挂载目录：
