@@ -168,6 +168,8 @@ deploy.md
 #### 方式 A：Docker
 
 ```bash
+git clone https://github.com/laozig/Yunlist.git
+cd Yunlist
 cp .env.example .env
 # 修改 .env
 # 修改 Caddyfile 中的域名和邮箱
@@ -179,9 +181,10 @@ docker compose up -d --build
 #### 方式 B：Native PM2
 
 ```bash
+git clone https://github.com/laozig/Yunlist.git
+cd Yunlist
 cp .env.example .env
-# 修改 .env
-# 修改 Caddyfile.native 中的域名和邮箱
+# 修改 .env（尤其是 CADDY_EMAIL / CADDY_DOMAIN）
 chmod +x deploy.sh
 ./deploy.sh
 ```
@@ -191,6 +194,7 @@ chmod +x deploy.sh
 - 安装前后端依赖
 - 构建前端和后端
 - 使用 PM2 启动或重载 `yunlist`
+- 如果 `.env` 中配置了 `CADDY_EMAIL` 和 `CADDY_DOMAIN`，还会自动尝试安装并配置宿主机版 Caddy
 
 ## 数据持久化说明
 
@@ -220,3 +224,4 @@ chmod +x deploy.sh
 - 分享二维码目前通过在线服务生成，便于快速使用。
 - 若需要更复杂的多用户权限、对象存储、分片上传等能力，可在现有基础上继续扩展。
 - Native PM2 部署模式下，推荐将 Caddy 配合 `Caddyfile.native` 使用，把 HTTPS 与反向代理交给宿主机处理。
+- `Caddyfile.native` 不一定必须放到 `/etc/caddy/Caddyfile`；那只是常见 Linux 包安装 Caddy 的默认路径。你也可以放在自定义位置，只要你的 Caddy 进程实际读取的是那个文件即可。

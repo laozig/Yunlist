@@ -73,6 +73,51 @@ ensure_runtime_dependencies() {
   fi
 }
 
+install_caddy() {
+  local manager
+  manager="$(detect_pkg_manager)"
+
+  case "$manager" in
+    apt)
+      if ! run_as_root apt-get install -y caddy; then
+        log "APT 默认仓库未提供 Caddy，尝试接入官方稳定源"
+        run_as_root apt-get update
+        run_as_root apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl gnupg
+        run_as_root bash -c "curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg"
+        run_as_root bash -c "curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list"
+        run_as_root apt-get update
+        run_as_root apt-get install -y caddy
+      fi
+      ;;
+    dnf)
+      run_as_root dnf install -y caddy || {
+        echo "无法自动安装 Caddy，请先为当前系统配置 Caddy 软件源。" >&2
+        exit 1
+      }
+      ;;
+    yum)
+      run_as_root yum install -y caddy || {
+        echo "无法自动安装 Caddy，请先为当前系统配置 Caddy 软件源。" >&2
+        exit 1
+      }
+      ;;
+    *)
+      echo "未检测到支持的包管理器，请手动安装 Caddy。" >&2
+      exit 1
+      ;;
+  esac
+}
+
+load_env_file() {
+  if [ -f "$ROOT_DIR/.env" ]; then
+    log "加载 .env 环境变量"
+    set -a
+    # shellcheck disable=SC1091
+    . "$ROOT_DIR/.env"
+    set +a
+  fi
+}
+
 prepare_environment() {
   cd "$ROOT_DIR"
   mkdir -p data/files data/db logs
@@ -81,6 +126,42 @@ prepare_environment() {
     log "未发现 .env，自动根据 .env.example 生成"
     cp .env.example .env
     echo "[deploy] 已生成 .env，请按需修改 ADMIN_PASSWORD / JWT_SECRET 等配置。"
+  fi
+}
+
+configure_native_caddy() {
+  if [ -z "${CADDY_DOMAIN:-}" ] || [ -z "${CADDY_EMAIL:-}" ]; then
+    log "未检测到 CADDY_DOMAIN / CADDY_EMAIL，跳过 Caddy 自动安装与配置"
+    log "如需原生 HTTPS，请先在 .env 中补充这两个变量，然后重新执行 ./deploy.sh"
+    return
+  fi
+
+  if ! ensure_command caddy; then
+    log "未检测到 Caddy，尝试自动安装"
+    install_caddy
+  fi
+
+  local rendered_file
+  rendered_file="$(mktemp)"
+  sed \
+    -e "s|your-email@example.com|${CADDY_EMAIL}|g" \
+    -e "s|your-domain.example.com|${CADDY_DOMAIN}|g" \
+    "$ROOT_DIR/Caddyfile.native" > "$rendered_file"
+
+  run_as_root mkdir -p /etc/caddy
+  run_as_root cp "$rendered_file" /etc/caddy/Caddyfile
+  rm -f "$rendered_file"
+
+  if command -v systemctl >/dev/null 2>&1; then
+    run_as_root systemctl enable caddy >/dev/null 2>&1 || true
+    if run_as_root systemctl is-active caddy >/dev/null 2>&1; then
+      run_as_root systemctl reload caddy || run_as_root systemctl restart caddy
+    else
+      run_as_root systemctl restart caddy || run_as_root systemctl start caddy
+    fi
+    log "Caddy 已配置并尝试启动/重载"
+  else
+    log "未检测到 systemctl，请手动执行：caddy run --config /etc/caddy/Caddyfile"
   fi
 }
 
@@ -133,9 +214,9 @@ print_summary() {
   pm2 restart yunlist
 
 如需配合 Caddy 原生部署：
-  1. 修改 Caddyfile.native 中的域名和邮箱
-  2. 将其放到 /etc/caddy/Caddyfile
-  3. 重启 Caddy：systemctl reload caddy
+  1. 在 .env 中配置 CADDY_EMAIL / CADDY_DOMAIN
+  2. 重新执行 ./deploy.sh，脚本会自动尝试安装并配置 Caddy
+  3. 若你的系统没有 systemd，请手动执行：caddy run --config /etc/caddy/Caddyfile
 
 EOF
 }
@@ -143,9 +224,11 @@ EOF
 main() {
   ensure_runtime_dependencies
   prepare_environment
+  load_env_file
   install_project_dependencies
   build_project
   start_or_reload_pm2
+  configure_native_caddy
   print_summary
 }
 

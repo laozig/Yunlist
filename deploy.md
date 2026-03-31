@@ -60,9 +60,25 @@ docker compose version
 
 ---
 
-## 4. 上传项目代码
+## 4. 获取项目代码
 
-把整个项目上传到服务器，例如放到：
+推荐直接在服务器上拉取代码：
+
+```bash
+git clone https://github.com/laozig/Yunlist.git
+cd Yunlist
+```
+
+如果你希望放到固定目录，也可以这样：
+
+```bash
+mkdir -p /opt
+cd /opt
+git clone https://github.com/laozig/Yunlist.git yunlist
+cd /opt/yunlist
+```
+
+或者你也可以手动上传整个项目到服务器，例如放到：
 
 ```bash
 /opt/yunlist
@@ -139,6 +155,15 @@ cp Caddyfile.native /etc/caddy/Caddyfile
 systemctl reload caddy
 ```
 
+> 注意：**不一定必须放到 `/etc/caddy/Caddyfile`**。这只是大多数 Linux 发行版通过包管理器安装 Caddy 后的默认配置位置。  
+> 如果你的 Caddy 不是这样安装的，也可以把 `Caddyfile.native` 放在任意你喜欢的位置，然后在启动命令里显式指定：
+
+```bash
+caddy run --config /your/custom/path/Caddyfile.native
+```
+
+或者如果你是 systemd 自己写的服务文件，那就让服务文件指向你自己的配置路径即可。
+
 ---
 
 ## 6. 配置环境变量
@@ -165,6 +190,8 @@ JWT_SECRET=请改成一串足够长的随机密钥
 FILES_ROOT=./data/files
 DB_PATH=./data/db/yunlist.db
 FRONTEND_DIST_PATH=./frontend/dist
+CADDY_EMAIL=your-email@example.com
+CADDY_DOMAIN=your-domain.example.com
 PORT=3000
 ```
 
@@ -173,6 +200,7 @@ PORT=3000
 - `ADMIN_PASSWORD`：设置为复杂密码
 - `JWT_SECRET`：建议使用 32 位以上随机字符串
 - `FILES_ROOT` 与 `DB_PATH`：保持默认即可，适用于 Native PM2
+- `CADDY_EMAIL` 与 `CADDY_DOMAIN`：Native PM2 + Caddy 自动配置时必填
 - Docker 模式下：`docker-compose.yml` 会自动覆盖为容器内路径，无需手改
 
 ---
@@ -218,6 +246,7 @@ chmod +x deploy.sh
 5. 构建前端
 6. 创建 `data/files`、`data/db`、`logs` 目录
 7. 使用 PM2 启动或重载 `yunlist`
+8. 如果 `.env` 中已配置 `CADDY_EMAIL` / `CADDY_DOMAIN`，自动尝试安装并配置宿主机版 Caddy
 
 常用 PM2 命令：
 
@@ -496,6 +525,24 @@ systemctl status caddy
 reverse_proxy 127.0.0.1:3000
 ```
 
+如果你已经在 `.env` 中配置了：
+
+```env
+CADDY_EMAIL=...
+CADDY_DOMAIN=...
+```
+
+那么重新执行：
+
+```bash
+./deploy.sh
+```
+
+脚本会自动：
+- 检测并安装 Caddy（支持的系统）
+- 生成 `/etc/caddy/Caddyfile`
+- 尝试 `systemctl enable/start/reload caddy`
+
 ---
 
 ## 15. 最简上线步骤（速查版）
@@ -513,8 +560,8 @@ docker compose up -d --build
 ### Native PM2 模式
 
 ```bash
-cd /opt/yunlist
-cp .env.example .env
+cd Yunlist
+# 修改 .env（尤其是 CADDY_EMAIL / CADDY_DOMAIN）
 # 修改 .env
 # 修改 Caddyfile.native 中的邮箱和域名
 chmod +x deploy.sh
