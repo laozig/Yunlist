@@ -73,7 +73,41 @@ export const initDB = async (): Promise<Database> => {
       )
     `);
 
+    try {
+      await dbInstance.exec('ALTER TABLE file_events ADD COLUMN ip_address TEXT');
+    } catch (e) {
+      // 字段已存在或其它错误，忽略
+    }
+
+    try {
+      await dbInstance.exec('ALTER TABLE file_events ADD COLUMN user_agent TEXT');
+    } catch (e) {
+      // 字段已存在或其它错误，忽略
+    }
+
+    try {
+      await dbInstance.exec('ALTER TABLE file_events ADD COLUMN access_scope TEXT');
+    } catch (e) {
+      // 字段已存在或其它错误，忽略
+    }
+
     await dbInstance.exec('CREATE INDEX IF NOT EXISTS idx_file_events_path_type ON file_events(relative_path, event_type)');
+
+    await dbInstance.exec(`
+      CREATE TABLE IF NOT EXISTS trash_entries (
+        id TEXT PRIMARY KEY,
+        original_path TEXT NOT NULL,
+        trash_path TEXT NOT NULL,
+        item_name TEXT NOT NULL,
+        is_directory INTEGER DEFAULT 0,
+        size INTEGER DEFAULT 0,
+        deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        meta_snapshot TEXT,
+        event_snapshot TEXT
+      )
+    `);
+
+    await dbInstance.exec('CREATE INDEX IF NOT EXISTS idx_trash_entries_deleted_at ON trash_entries(deleted_at DESC)');
 
     // Create system config table
     await dbInstance.exec(`

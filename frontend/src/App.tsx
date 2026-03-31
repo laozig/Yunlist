@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { FileList, type FileItem } from './components/FileList';
 import { FileDetailPanel } from './components/FileDetailPanel';
@@ -6,6 +6,8 @@ import { SharedView } from './components/SharedView';
 import { SecurityView } from './components/SecurityView';
 import { SettingsView } from './components/SettingsView';
 import { AnalyticsView } from './components/AnalyticsView';
+import { TrashView } from './components/TrashView';
+import { AuditView } from './components/AuditView';
 import { api } from './lib/api';
 import { Lock, LogOut, User, ChevronDown } from 'lucide-react';
 import { cn } from './lib/utils';
@@ -113,6 +115,10 @@ function App() {
         return <SharedView />;
       case 'analytics':
         return <AnalyticsView />;
+      case 'audit':
+        return <AuditView />;
+      case 'trash':
+        return <TrashView />;
       case 'security':
         return <SecurityView />;
       case 'settings':
@@ -148,6 +154,8 @@ function App() {
                 {activeView === 'explorer' ? '我的文件' : 
                  activeView === 'shared' ? '已分享' : 
                  activeView === 'analytics' ? '数据分析' :
+                 activeView === 'audit' ? '访问审计' :
+                 activeView === 'trash' ? '回收站' :
                  activeView === 'security' ? '安全管理' : 
                  activeView === 'settings' ? '系统设置' : activeView} 
                 {activeView === 'explorer' && ` • / 根目录 ${currentPath}`}

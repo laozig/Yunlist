@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react';
 import { api, triggerBlobDownload } from '../lib/api';
 import { Link2, Trash2, ExternalLink, ShieldCheck, Download, Copy, Check, CalendarClock, Eye } from 'lucide-react';
 import { format } from 'date-fns';
+import { ShareQrModal } from './ShareQrModal';
 
 export function SharedView() {
   const [files, setFiles] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [qrTarget, setQrTarget] = useState<{ title: string; url: string } | null>(null);
 
   const fetchShared = async () => {
     setIsLoading(true);
@@ -50,6 +52,13 @@ export function SharedView() {
     } catch (err: any) {
       alert(err.message || '打包下载失败');
     }
+  };
+
+  const handleShowQr = (file: any) => {
+    setQrTarget({
+      title: file.title || file.relative_path.split('/').pop() || file.relative_path,
+      url: `${window.location.origin}/share/${getShareToken(file)}`,
+    });
   };
 
   if (isLoading) {
@@ -106,6 +115,13 @@ export function SharedView() {
                    >
                     {copiedId === file.relative_path ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
                   </button>
+                  <button 
+                    onClick={() => handleShowQr(file)}
+                    className="px-3 py-2 rounded-lg bg-white hover:bg-gray-50 text-gray-700 text-xs font-semibold border border-gray-200 transition"
+                    title="查看二维码"
+                  >
+                    二维码
+                  </button>
                   <a 
                     href={`/share/${getShareToken(file)}`} 
                     target="_blank" 
@@ -127,6 +143,13 @@ export function SharedView() {
           ))}
         </div>
       )}
+
+      <ShareQrModal
+        open={!!qrTarget}
+        title={qrTarget?.title || ''}
+        url={qrTarget?.url || ''}
+        onClose={() => setQrTarget(null)}
+      />
     </div>
   );
 }

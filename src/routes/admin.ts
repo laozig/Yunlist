@@ -1,12 +1,16 @@
 import { FastifyInstance } from 'fastify';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { pipeline } from 'stream/promises';
 import { getSecureFilePath, normalizeRelativePath } from '../utils/pathUtils';
 import { FileMetaModel } from '../models/fileMeta';
+import { TrashEntryModel } from '../models/trashEntry';
 import { config } from '../config';
 import fastifyMultipart from '@fastify/multipart';
 import { sendArchiveReply } from '../utils/archive';
+
+const INTERNAL_TRASH_DIR = '.trash';
 
 function normalizeIncomingPath(rawPath: unknown): string {
   if (typeof rawPath !== 'string') return '';
@@ -26,6 +30,11 @@ function normalizeIncomingPaths(rawPaths: unknown): string[] {
   return Array.from(new Set(rawPaths.map(normalizeIncomingPath).filter(Boolean)));
 }
 
+function normalizeIncomingIds(rawIds: unknown): string[] {
+  if (!Array.isArray(rawIds)) return [];
+  return Array.from(new Set(rawIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)));
+}
+
 function pruneNestedPaths(paths: string[]): string[] {
   const sorted = [...paths].sort((a, b) => a.length - b.length);
   return sorted.filter((candidate, index) => {
@@ -34,6 +43,17 @@ function pruneNestedPaths(paths: string[]): string[] {
       return candidate.startsWith(parent + '/');
     });
   });
+}
+
+function isManagedInternalPath(relativePath: string): boolean {
+  const normalizedPath = normalizeRelativePath(relativePath);
+  return normalizedPath === INTERNAL_TRASH_DIR || normalizedPath.startsWith(`${INTERNAL_TRASH_DIR}/`);
+}
+
+function ensureManagedPublicPath(relativePath: string) {
+  if (isManagedInternalPath(relativePath)) {
+    throw new Error('系统保留目录不可直接操作');
+  }
 }
 
 function parseNullableInteger(value: unknown): number | null | undefined {
@@ -79,24 +99,98 @@ function isSubPath(candidate: string, rootPath: string): boolean {
 }
 
 async function deleteManagedPath(relativePath: string) {
+  if (!relativePath) {
+    throw new Error('不支持直接删除根目录');
+  }
+
+  ensureManagedPublicPath(relativePath);
   const targetPath = getSecureFilePath(relativePath);
 
-  if (fs.existsSync(targetPath)) {
-    const stat = await fs.promises.lstat(targetPath);
+  if (!fs.existsSync(targetPath)) {
+    await FileMetaModel.deleteByPath(relativePath);
+    return;
+  }
 
+  const stat = await fs.promises.lstat(targetPath);
+  const { metaRows, eventRows } = await FileMetaModel.exportPathRecords(relativePath);
+  const trashId = randomUUID();
+  const trashRelativePath = normalizeRelativePath(path.posix.join(INTERNAL_TRASH_DIR, `${trashId}-${path.posix.basename(relativePath)}`));
+  const trashPath = getSecureFilePath(trashRelativePath);
+
+  await fs.promises.mkdir(path.dirname(trashPath), { recursive: true });
+  await fs.promises.rename(targetPath, trashPath);
+
+  try {
+    await TrashEntryModel.create({
+      id: trashId,
+      original_path: relativePath,
+      trash_path: trashRelativePath,
+      item_name: path.posix.basename(relativePath),
+      is_directory: stat.isDirectory(),
+      size: stat.isDirectory() ? 0 : stat.size,
+      meta_snapshot: JSON.stringify(metaRows),
+      event_snapshot: JSON.stringify(eventRows),
+    });
+
+    await FileMetaModel.deleteByPath(relativePath);
+  } catch (error) {
+    await fs.promises.rename(trashPath, targetPath).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function restoreTrashEntryById(id: string) {
+  const entry = await TrashEntryModel.findById(id);
+  if (!entry) {
+    throw new Error('回收站记录不存在');
+  }
+
+  ensureManagedPublicPath(entry.original_path);
+  const targetPath = getSecureFilePath(entry.original_path);
+  const trashPath = getSecureFilePath(entry.trash_path);
+
+  if (fs.existsSync(targetPath)) {
+    throw new Error('原路径已被占用，请先手动处理冲突');
+  }
+
+  if (!fs.existsSync(trashPath)) {
+    await TrashEntryModel.deleteById(id);
+    throw new Error('回收站文件已丢失，记录已清理');
+  }
+
+  await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
+  await fs.promises.rename(trashPath, targetPath);
+
+  try {
+    await FileMetaModel.deleteByPath(entry.original_path);
+    const metaRows = entry.meta_snapshot ? JSON.parse(entry.meta_snapshot) : [];
+    const eventRows = entry.event_snapshot ? JSON.parse(entry.event_snapshot) : [];
+    await FileMetaModel.restorePathRecords(metaRows, eventRows);
+    await TrashEntryModel.deleteById(id);
+    return entry.original_path;
+  } catch (error) {
+    await fs.promises.rename(targetPath, trashPath).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function purgeTrashEntryById(id: string) {
+  const entry = await TrashEntryModel.findById(id);
+  if (!entry) {
+    throw new Error('回收站记录不存在');
+  }
+
+  const trashPath = getSecureFilePath(entry.trash_path);
+  if (fs.existsSync(trashPath)) {
+    const stat = await fs.promises.lstat(trashPath);
     if (stat.isDirectory()) {
-      await fs.promises.rm(targetPath, {
-        recursive: true,
-        force: true,
-        maxRetries: 3,
-        retryDelay: 100,
-      });
+      await fs.promises.rm(trashPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     } else {
-      await fs.promises.unlink(targetPath);
+      await fs.promises.unlink(trashPath);
     }
   }
 
-  await FileMetaModel.deleteByPath(relativePath);
+  await TrashEntryModel.deleteById(id);
 }
 
 export default async function adminRoutes(fastify: FastifyInstance) {
@@ -121,26 +215,36 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { dirPath = '' } = request.query as any;
 
     try {
+      ensureManagedPublicPath(dirPath);
       const targetDir = getSecureFilePath(dirPath);
 
       if (!fs.existsSync(targetDir) || !fs.statSync(targetDir).isDirectory()) {
          return reply.code(404).send({ error: 'Directory not found' });
       }
 
-      const fileDirents = fs.readdirSync(targetDir, { withFileTypes: true });
+      const fileDirents = fs.readdirSync(targetDir, { withFileTypes: true }).filter((dirent) => dirent.name !== INTERNAL_TRASH_DIR);
       const files = await Promise.all(fileDirents.map(async (dirent) => {
         const relPath = normalizeRelativePath(path.posix.join(dirPath.replace(/\\/g, '/'), dirent.name));
         const metaInfo = await FileMetaModel.findByPath(relPath);
+        const stat = fs.statSync(path.join(targetDir, dirent.name));
 
         return {
           name: dirent.name,
           isDirectory: dirent.isDirectory(),
           relativePath: relPath,
-          size: dirent.isDirectory() ? 0 : fs.statSync(path.join(targetDir, dirent.name)).size,
-          lastModified: fs.statSync(path.join(targetDir, dirent.name)).mtimeMs,
+          size: dirent.isDirectory() ? 0 : stat.size,
+          lastModified: stat.mtimeMs,
           metaInfo
         };
       }));
+
+      files.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) {
+          return a.isDirectory ? -1 : 1;
+        }
+
+        return a.name.localeCompare(b.name, 'zh-CN');
+      });
 
       return { files };
     } catch (e: any) {
@@ -155,6 +259,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       if (!data) return reply.code(400).send({ error: 'No file uploaded' });
 
       const targetDirField = data.fields.dirPath ? (data.fields.dirPath as any).value : '';
+      ensureManagedPublicPath(targetDirField);
 
       const relativePathToSave = path.posix.join(targetDirField, data.filename);
       const destPath = getSecureFilePath(relativePathToSave);
@@ -197,6 +302,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const relativePath = normalizeRelativePath(rawPath);
 
     try {
+      ensureManagedPublicPath(relativePath);
       const absoluteTarget = getSecureFilePath(relativePath);
       const targetExists = fs.existsSync(absoluteTarget);
       const existingMeta = await FileMetaModel.findByPath(relativePath);
@@ -256,6 +362,77 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { files: existingFiles.filter(Boolean) };
   });
 
+  // 5.0 回收站列表
+  fastify.get('/trash', async () => {
+    const items = await TrashEntryModel.listAll();
+    return { items };
+  });
+
+  // 5.0.1 恢复回收站文件
+  fastify.post('/trash/:id/restore', async (request, reply) => {
+    const { id } = request.params as any;
+
+    try {
+      const restoredPath = await restoreTrashEntryById(id);
+      return { success: true, relativePath: restoredPath };
+    } catch (e: any) {
+      reply.code(e.message === '回收站记录不存在' || e.message === '回收站文件已丢失，记录已清理' ? 404 : 400).send({ error: e.message });
+    }
+  });
+
+  // 5.0.2 彻底删除回收站文件
+  fastify.delete('/trash/:id', async (request, reply) => {
+    const { id } = request.params as any;
+
+    try {
+      await purgeTrashEntryById(id);
+      return { success: true };
+    } catch (e: any) {
+      reply.code(e.message === '回收站记录不存在' ? 404 : 400).send({ error: e.message });
+    }
+  });
+
+  fastify.post('/trash/batch/restore', async (request, reply) => {
+    const ids = normalizeIncomingIds((request.body as any)?.ids);
+    if (ids.length === 0) {
+      return reply.code(400).send({ error: '至少需要选择一条回收站记录' });
+    }
+
+    const restored: string[] = [];
+    const failed: Array<{ id: string; error: string }> = [];
+
+    for (const id of ids) {
+      try {
+        restored.push(await restoreTrashEntryById(id));
+      } catch (error: any) {
+        failed.push({ id, error: error.message || '恢复失败' });
+      }
+    }
+
+    return { success: failed.length === 0, restored, failed };
+  });
+
+  fastify.post('/trash/batch/delete', async (request, reply) => {
+    const ids = normalizeIncomingIds((request.body as any)?.ids);
+    if (ids.length === 0) {
+      return reply.code(400).send({ error: '至少需要选择一条回收站记录' });
+    }
+
+    const deleted: string[] = [];
+    const failed: Array<{ id: string; error: string }> = [];
+
+    for (const id of ids) {
+      try {
+        await purgeTrashEntryById(id);
+        deleted.push(id);
+      } catch (error: any) {
+        failed.push({ id, error: error.message || '删除失败' });
+      }
+    }
+
+    return { success: failed.length === 0, deleted, failed };
+  });
+
   // 5.1 批量切换分享状态
   fastify.post('/batch/share', async (request, reply) => {
     const { paths: rawPaths, isPublic } = (request.body as any) ?? {};
@@ -273,6 +450,12 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       const failedPaths: string[] = [];
 
       for (const relativePath of paths) {
+        if (!relativePath) {
+          failedPaths.push('根目录');
+          continue;
+        }
+
+        ensureManagedPublicPath(relativePath);
         const absoluteTarget = getSecureFilePath(relativePath);
         const exists = fs.existsSync(absoluteTarget);
 
@@ -349,6 +532,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     try {
+      ensureManagedPublicPath(sourcePath);
+      ensureManagedPublicPath(destinationPath);
       const sourceAbsolutePath = getSecureFilePath(sourcePath);
       const destinationAbsolutePath = getSecureFilePath(destinationPath);
 
@@ -381,6 +566,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     try {
+      ensureManagedPublicPath(destinationDir);
       const destinationAbsoluteDir = getSecureFilePath(destinationDir);
       if (!fs.existsSync(destinationAbsoluteDir) || !fs.statSync(destinationAbsoluteDir).isDirectory()) {
         return reply.code(404).send({ error: '目标目录不存在' });
@@ -388,11 +574,13 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
       const plannedPaths = new Set<string>();
       for (const sourcePath of sourcePaths) {
+        ensureManagedPublicPath(sourcePath);
         if (!sourcePath) {
           return reply.code(400).send({ error: '不支持移动根目录' });
         }
 
         const destinationPath = buildDestinationPath(sourcePath, destinationDir);
+        ensureManagedPublicPath(destinationPath);
         if (isSubPath(destinationDir, sourcePath)) {
           return reply.code(400).send({ error: `不能把文件夹移动到其自身内部：${sourcePath}` });
         }
@@ -436,6 +624,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     try {
+      ensureManagedPublicPath(destinationDir);
       const destinationAbsoluteDir = getSecureFilePath(destinationDir);
       if (!fs.existsSync(destinationAbsoluteDir) || !fs.statSync(destinationAbsoluteDir).isDirectory()) {
         return reply.code(404).send({ error: '目标目录不存在' });
@@ -443,7 +632,9 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
       const plannedPaths = new Set<string>();
       for (const sourcePath of sourcePaths) {
+        ensureManagedPublicPath(sourcePath);
         const destinationPath = buildDestinationPath(sourcePath, destinationDir);
+        ensureManagedPublicPath(destinationPath);
         if (isSubPath(destinationDir, sourcePath)) {
           return reply.code(400).send({ error: `不能复制到其自身内部：${sourcePath}` });
         }
@@ -486,6 +677,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     try {
+      ensureManagedPublicPath(filePath);
       const targetPath = getSecureFilePath(filePath);
       if (!fs.existsSync(targetPath)) {
         return reply.code(404).send({ error: '文件或文件夹不存在' });
@@ -495,6 +687,34 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     } catch (e: any) {
       reply.code(400).send({ error: e.message });
     }
+  });
+
+  // 5.7 访问审计日志
+  fastify.get('/audit/logs', async (request) => {
+    const query = (request.query as any) ?? {};
+    const rawLimit = Number(query.limit ?? 100);
+    const rawOffset = Number(query.offset ?? 0);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 200) : 100;
+    const offset = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0) : 0;
+    const eventType = query.eventType === 'view' || query.eventType === 'download' ? query.eventType : undefined;
+    const accessScope = typeof query.accessScope === 'string' && query.accessScope.trim() ? query.accessScope.trim() : undefined;
+    const keyword = typeof query.keyword === 'string' ? query.keyword : undefined;
+
+    const { items, total } = await FileMetaModel.getRecentEvents({
+      limit,
+      offset,
+      eventType,
+      accessScope,
+      keyword,
+    });
+
+    return {
+      items,
+      total,
+      limit,
+      offset,
+      hasMore: offset + items.length < total,
+    };
   });
 
   // 6. 获取系统运行状态
@@ -539,6 +759,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     try {
       const fullPath = path.posix.join(dirPath || '', name);
+      ensureManagedPublicPath(fullPath);
       const physicalPath = getSecureFilePath(fullPath);
 
       if (fs.existsSync(physicalPath)) {

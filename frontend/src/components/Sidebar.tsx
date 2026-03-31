@@ -1,4 +1,4 @@
-import { HardDrive, Settings, FolderClosed, Users, ShieldAlert, BarChart3 } from 'lucide-react';
+import { HardDrive, Settings, FolderClosed, Users, ShieldAlert, BarChart3, Trash2, ScrollText } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface SidebarProps {
@@ -11,6 +11,8 @@ export function Sidebar({ activeItem, onSelect }: SidebarProps) {
     { id: 'explorer', name: '我的文件', icon: HardDrive },
     { id: 'shared', name: '已分享', icon: Users },
     { id: 'analytics', name: '数据分析', icon: BarChart3 },
+    { id: 'audit', name: '访问审计', icon: ScrollText },
+    { id: 'trash', name: '回收站', icon: Trash2 },
     { id: 'security', name: '安全管理', icon: ShieldAlert },
     { id: 'settings', name: '系统设置', icon: Settings },
   ];

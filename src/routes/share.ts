@@ -92,6 +92,15 @@ function getShareRestrictionMessage(
   return null;
 }
 
+function getRequestAuditDetails(request: any, accessScope: string) {
+  const rawUserAgent = request.headers?.['user-agent'];
+  return {
+    ipAddress: request.ip ?? null,
+    userAgent: typeof rawUserAgent === 'string' ? rawUserAgent : null,
+    accessScope,
+  };
+}
+
 export default async function shareRoutes(fastify: FastifyInstance) {
   // 获取分享文件的公开信息
   fastify.get('/:id', async (request, reply) => {
@@ -122,7 +131,7 @@ export default async function shareRoutes(fastify: FastifyInstance) {
       }
 
       if (!currentPath) {
-        await FileMetaModel.logEvent(sharedRootPath, 'view');
+        await FileMetaModel.logEvent(sharedRootPath, 'view', getRequestAuditDetails(request, 'share:view'));
         accessState.views += 1;
         if (accessState.remainingViews != null) {
           accessState.remainingViews = Math.max(accessState.remainingViews - 1, 0);
@@ -241,7 +250,7 @@ export default async function shareRoutes(fastify: FastifyInstance) {
         return reply.code(403).send({ error: 'Access denied' });
       }
 
-      await FileMetaModel.logEvent(sharedRootPath, 'download');
+      await FileMetaModel.logEvent(sharedRootPath, 'download', getRequestAuditDetails(request, 'share:download'));
 
       const targetPath = getSecureFilePath(finalRelPath);
       if (!fs.existsSync(targetPath)) {
@@ -303,7 +312,7 @@ export default async function shareRoutes(fastify: FastifyInstance) {
         return reply.code(404).send({ error: '物理文件已丢失' });
       }
 
-      await FileMetaModel.logEvent(sharedRootPath, 'download');
+      await FileMetaModel.logEvent(sharedRootPath, 'download', getRequestAuditDetails(request, 'share:archive'));
       return await sendArchiveReply(reply, targetPath);
     } catch (e: any) {
       reply.code(400).send({ error: e.message });

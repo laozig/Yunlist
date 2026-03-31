@@ -1,6 +1,9 @@
 class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  status: number;
+
+  constructor(status: number, message: string) {
     super(message);
+    this.status = status;
   }
 }
 
@@ -8,6 +11,42 @@ export interface BlobResponse {
   blob: Blob;
   filename: string;
   contentType: string;
+}
+
+export interface TrashItem {
+  id: string;
+  original_path: string;
+  trash_path: string;
+  item_name: string;
+  is_directory: boolean;
+  size: number;
+  deleted_at?: string;
+}
+
+export interface BatchTrashResponse {
+  success: boolean;
+  restored?: string[];
+  deleted?: string[];
+  failed: Array<{ id: string; error: string }>;
+}
+
+export interface AuditLogItem {
+  id?: number;
+  relative_path: string;
+  event_type: 'view' | 'download';
+  created_at?: string;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  access_scope?: string | null;
+  title?: string | null;
+}
+
+export interface AuditLogsResponse {
+  items: AuditLogItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
 }
 
 function buildHeaders(options: RequestInit = {}) {
@@ -188,6 +227,42 @@ export const api = {
 
   getSharedFiles: () =>
     request<{files: any[]}>('/api/admin/shared'),
+
+  getTrashItems: () =>
+    request<{items: TrashItem[]}>('/api/admin/trash'),
+
+  restoreTrashItem: (id: string) =>
+    request<{success: boolean, relativePath: string}>(`/api/admin/trash/${id}/restore`, {
+      method: 'POST',
+    }),
+
+  restoreTrashItems: (ids: string[]) =>
+    request<BatchTrashResponse>('/api/admin/trash/batch/restore', {
+      method: 'POST',
+      body: JSON.stringify({ ids })
+    }),
+
+  deleteTrashItem: (id: string) =>
+    request<{success: boolean}>(`/api/admin/trash/${id}`, {
+      method: 'DELETE',
+    }),
+
+  deleteTrashItems: (ids: string[]) =>
+    request<BatchTrashResponse>('/api/admin/trash/batch/delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids })
+    }),
+
+  getAuditLogs: (params: { limit?: number; offset?: number; eventType?: 'view' | 'download' | 'all'; accessScope?: string; keyword?: string } = {}) => {
+    const searchParams = new URLSearchParams();
+    if (params.limit != null) searchParams.set('limit', String(params.limit));
+    if (params.offset != null) searchParams.set('offset', String(params.offset));
+    if (params.eventType && params.eventType !== 'all') searchParams.set('eventType', params.eventType);
+    if (params.accessScope) searchParams.set('accessScope', params.accessScope);
+    if (params.keyword) searchParams.set('keyword', params.keyword);
+
+    return request<AuditLogsResponse>(`/api/admin/audit/logs?${searchParams.toString()}`);
+  },
 
   getSystemStats: () =>
     request<any>('/api/admin/system-stats'),

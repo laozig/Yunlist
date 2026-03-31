@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { File, Folder, MoreHorizontal, UploadCloud, FolderPlus, Trash2, Search, Download, Copy } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
@@ -37,12 +37,14 @@ interface FileListProps {
 
 export function FileList({ files, currentPath, onFileClick, onDetailClick, selectedFileId, onUpdate }: FileListProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragCounterRef = useRef(0);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [sortMode, setSortMode] = useState<'name-asc' | 'name-desc' | 'size-desc' | 'size-asc' | 'updated-desc' | 'updated-asc'>('name-asc');
   const [pickerMode, setPickerMode] = useState<'move' | 'copy' | null>(null);
   const [pickerPaths, setPickerPaths] = useState<string[]>([]);
+  const [isDragActive, setIsDragActive] = useState(false);
 
   useEffect(() => {
     setSelectedPaths(prev => prev.filter(path => files.some(file => file.relativePath === path)));
@@ -102,18 +104,78 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
 
   const resetSelection = () => setSelectedPaths([]);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const uploadFiles = async (uploadTargets: File[]) => {
+    if (uploadTargets.length === 0) return;
+
     setIsUploading(true);
+    const failedFiles: string[] = [];
+
     try {
-      await api.uploadFile(currentPath, file);
+      for (const uploadTarget of uploadTargets) {
+        try {
+          await api.uploadFile(currentPath, uploadTarget);
+        } catch (err) {
+          console.error(err);
+          failedFiles.push(uploadTarget.name);
+        }
+      }
+
       onUpdate?.();
-    } catch (err: any) {
-      alert(err.message || '上传失败');
+
+      if (failedFiles.length > 0) {
+        alert(`以下文件上传失败：${failedFiles.join('、')}`);
+      }
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files ? Array.from(e.target.files) : [];
+    try {
+      await uploadFiles(fileList);
+    } catch (err: any) {
+      alert(err.message || '上传失败');
+    }
+  };
+
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.dataTransfer.types.includes('Files')) return;
+    dragCounterRef.current += 1;
+    setIsDragActive(true);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = Math.max(dragCounterRef.current - 1, 0);
+    if (dragCounterRef.current === 0) {
+      setIsDragActive(false);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDragActive(false);
+    const droppedFiles = Array.from(e.dataTransfer.files || []);
+
+    if (droppedFiles.length === 0) return;
+    try {
+      await uploadFiles(droppedFiles);
+    } catch (err: any) {
+      alert(err.message || '拖拽上传失败');
     }
   };
 
@@ -218,7 +280,13 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
     : null;
 
   return (
-    <div className="flex-1 p-8 overflow-y-auto">
+    <div
+      className="flex-1 p-8 overflow-y-auto relative"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <div className="flex items-center justify-between mb-8">
         <h2 className="text-2xl font-bold text-gray-800 tracking-tight">文件存储</h2>
         <div className="flex items-center gap-3">
@@ -230,7 +298,7 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
             新建文件夹
           </button>
           
-          <input type="file" ref={fileInputRef} className="hidden" onChange={handleUpload} />
+          <input type="file" ref={fileInputRef} className="hidden" onChange={handleUpload} multiple />
           <button 
              onClick={() => fileInputRef.current?.click()}
              disabled={isUploading}
@@ -473,6 +541,14 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
         onClose={closePicker}
         onConfirm={handleDirectoryConfirm}
       />
+
+      {isDragActive && (
+        <div className="absolute inset-4 rounded-[32px] border-2 border-dashed border-indigo-300 bg-indigo-50/80 backdrop-blur-sm flex flex-col items-center justify-center text-center text-indigo-600 z-30 pointer-events-none">
+          <UploadCloud className="w-12 h-12 mb-4" />
+          <p className="text-lg font-bold">松开即可上传到当前目录</p>
+          <p className="text-sm font-medium text-indigo-500 mt-2">目标路径：/{currentPath || ''}</p>
+        </div>
+      )}
     </div>
   )
 }

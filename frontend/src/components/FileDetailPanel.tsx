@@ -5,6 +5,7 @@ import { type FileItem } from './FileList';
 import { cn } from '../lib/utils';
 import { api, triggerBlobDownload } from '../lib/api';
 import { format } from 'date-fns';
+import { ShareQrModal } from './ShareQrModal';
 
 interface FileDetailPanelProps {
   file: FileItem | null;
@@ -24,6 +25,7 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
   const [isSaving, setIsSaving] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isArchiveDownloading, setIsArchiveDownloading] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
 
   const toDatetimeLocal = (value?: string | null) => {
     if (!value) return '';
@@ -273,6 +275,13 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
                           value={`${window.location.origin}/share/${shareId.trim() || btoa(encodeURIComponent(file.relativePath))}`}
                           className="w-full bg-transparent text-[13px] text-gray-500 font-mono focus:outline-none truncate" 
                         />
+
+                        <button
+                          onClick={() => setShowQrModal(true)}
+                          className="self-start mt-1 text-xs font-semibold px-3 py-1.5 rounded-full bg-white border border-indigo-100 text-indigo-600 hover:bg-indigo-50 transition"
+                        >
+                          查看分享二维码
+                        </button>
                      </div>
 
                      <div className="mt-4 space-y-4">
@@ -386,6 +395,13 @@ export function FileDetailPanel({ file, onClose, onFolderOpen }: FileDetailPanel
               </button>
             </div>
           </motion.div>
+
+          <ShareQrModal
+            open={showQrModal}
+            title={title || file.name}
+            url={`${window.location.origin}/share/${shareId.trim() || btoa(encodeURIComponent(file.relativePath))}`}
+            onClose={() => setShowQrModal(false)}
+          />
         </>
       )}
     </AnimatePresence>

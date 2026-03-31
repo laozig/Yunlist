@@ -17,6 +17,25 @@ export interface FileMeta {
   updated_at?: string;
 }
 
+export interface FileEventRecord {
+  id?: number;
+  relative_path: string;
+  event_type: 'view' | 'download';
+  created_at?: string;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  access_scope?: string | null;
+  title?: string | null;
+}
+
+export interface GetRecentEventsOptions {
+  limit?: number;
+  offset?: number;
+  eventType?: 'view' | 'download';
+  accessScope?: string;
+  keyword?: string;
+}
+
 function mapFileMetaRow(row: any): FileMeta | undefined {
   if (!row) return undefined;
 
@@ -153,9 +172,133 @@ export const FileMetaModel = {
   },
 
   // 记录访问事件
-  logEvent: async (relativePath: string, eventType: 'view' | 'download') => {
+  logEvent: async (
+    relativePath: string,
+    eventType: 'view' | 'download',
+    details: { ipAddress?: string | null; userAgent?: string | null; accessScope?: string | null } = {}
+  ) => {
     const db = getDB();
-    return await db.run('INSERT INTO file_events (relative_path, event_type) VALUES (?, ?)', [relativePath, eventType]);
+    return await db.run(
+      'INSERT INTO file_events (relative_path, event_type, ip_address, user_agent, access_scope) VALUES (?, ?, ?, ?, ?)',
+      [relativePath, eventType, details.ipAddress ?? null, details.userAgent ?? null, details.accessScope ?? null]
+    );
+  },
+
+  exportPathRecords: async (relativePath: string): Promise<{ metaRows: any[]; eventRows: FileEventRecord[] }> => {
+    const db = getDB();
+    const prefix = relativePath.endsWith('/') ? relativePath : `${relativePath}/`;
+
+    const metaRows = await db.all('SELECT * FROM files_meta WHERE relative_path = ? OR relative_path LIKE ?', [relativePath, `${prefix}%`]);
+    const eventRows = await db.all('SELECT * FROM file_events WHERE relative_path = ? OR relative_path LIKE ?', [relativePath, `${prefix}%`]);
+
+    return { metaRows, eventRows };
+  },
+
+  restorePathRecords: async (metaRows: any[] = [], eventRows: FileEventRecord[] = []) => {
+    const db = getDB();
+    await db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const row of metaRows) {
+        await db.run(`
+          INSERT INTO files_meta (
+            relative_path, title, description, is_public, access_password, share_id, expires_at, max_views, max_downloads, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          row.relative_path,
+          row.title ?? null,
+          row.description ?? null,
+          row.is_public ?? 0,
+          row.access_password ?? null,
+          row.share_id ?? null,
+          row.expires_at ?? null,
+          row.max_views ?? null,
+          row.max_downloads ?? null,
+          row.created_at ?? null,
+          row.updated_at ?? null,
+        ]);
+      }
+
+      for (const row of eventRows) {
+        await db.run(
+          'INSERT INTO file_events (relative_path, event_type, created_at, ip_address, user_agent, access_scope) VALUES (?, ?, ?, ?, ?, ?)',
+          [
+            row.relative_path,
+            row.event_type,
+            row.created_at ?? null,
+            row.ip_address ?? null,
+            row.user_agent ?? null,
+            row.access_scope ?? null,
+          ]
+        );
+      }
+
+      await db.exec('COMMIT');
+    } catch (error) {
+      await db.exec('ROLLBACK');
+      throw error;
+    }
+  },
+
+  getRecentEvents: async (options: GetRecentEventsOptions = {}): Promise<{ items: FileEventRecord[]; total: number }> => {
+    const db = getDB();
+    const limit = Math.min(Math.max(options.limit ?? 100, 1), 200);
+    const offset = Math.max(options.offset ?? 0, 0);
+    const conditions: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (options.eventType) {
+      conditions.push('fe.event_type = ?');
+      params.push(options.eventType);
+    }
+
+    if (options.accessScope) {
+      conditions.push('fe.access_scope = ?');
+      params.push(options.accessScope);
+    }
+
+    const keyword = options.keyword?.trim().toLowerCase();
+    if (keyword) {
+      conditions.push(`(
+        LOWER(fe.relative_path) LIKE ? OR
+        LOWER(COALESCE(fm.title, '')) LIKE ? OR
+        LOWER(COALESCE(fe.ip_address, '')) LIKE ? OR
+        LOWER(COALESCE(fe.user_agent, '')) LIKE ? OR
+        LOWER(COALESCE(fe.access_scope, '')) LIKE ?
+      )`);
+      const likeKeyword = `%${keyword}%`;
+      params.push(likeKeyword, likeKeyword, likeKeyword, likeKeyword, likeKeyword);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const rows = await db.all(`
+      SELECT
+        fe.id,
+        fe.relative_path,
+        fe.event_type,
+        fe.created_at,
+        fe.ip_address,
+        fe.user_agent,
+        fe.access_scope,
+        fm.title
+      FROM file_events fe
+      LEFT JOIN files_meta fm ON fm.relative_path = fe.relative_path
+      ${whereClause}
+      ORDER BY fe.created_at DESC, fe.id DESC
+      LIMIT ? OFFSET ?
+    `, [...params, limit, offset]);
+
+    const totalRow = await db.get(`
+      SELECT COUNT(*) AS total
+      FROM file_events fe
+      LEFT JOIN files_meta fm ON fm.relative_path = fe.relative_path
+      ${whereClause}
+    `, params);
+
+    return {
+      items: rows as FileEventRecord[],
+      total: Number(totalRow?.total ?? 0),
+    };
   },
 
   // 获取过去 N 天的聚合统计数据 (用于图表)
@@ -208,7 +351,7 @@ export const FileMetaModel = {
     const sourcePrefix = `${sourcePath}/`;
 
     const metaRows = await db.all('SELECT * FROM files_meta WHERE relative_path = ? OR relative_path LIKE ?', [sourcePath, `${sourcePrefix}%`]);
-    const eventRows = await db.all('SELECT relative_path, event_type, created_at FROM file_events WHERE relative_path = ? OR relative_path LIKE ?', [sourcePath, `${sourcePrefix}%`]);
+    const eventRows = await db.all('SELECT relative_path, event_type, created_at, ip_address, user_agent, access_scope FROM file_events WHERE relative_path = ? OR relative_path LIKE ?', [sourcePath, `${sourcePrefix}%`]);
 
     if (metaRows.length === 0 && eventRows.length === 0) {
       return;
@@ -245,8 +388,15 @@ export const FileMetaModel = {
 
         for (const row of eventRows) {
           await db.run(
-            'INSERT INTO file_events (relative_path, event_type, created_at) VALUES (?, ?, ?)',
-            [replacePathPrefix(row.relative_path, sourcePath, destinationPath), row.event_type, row.created_at ?? null]
+            'INSERT INTO file_events (relative_path, event_type, created_at, ip_address, user_agent, access_scope) VALUES (?, ?, ?, ?, ?, ?)',
+            [
+              replacePathPrefix(row.relative_path, sourcePath, destinationPath),
+              row.event_type,
+              row.created_at ?? null,
+              row.ip_address ?? null,
+              row.user_agent ?? null,
+              row.access_scope ?? null,
+            ]
           );
         }
       }
@@ -308,3 +458,4 @@ export const FileMetaModel = {
     return row ? row.value : null;
   }
 };
+
