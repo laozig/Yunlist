@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { pipeline } from 'stream/promises';
@@ -191,6 +192,17 @@ async function purgeTrashEntryById(id: string) {
   }
 
   await TrashEntryModel.deleteById(id);
+}
+
+async function readAppVersion(): Promise<string> {
+  try {
+    const packageJsonPath = path.join(process.cwd(), 'package.json');
+    const raw = await fs.promises.readFile(packageJsonPath, 'utf8');
+    const pkg = JSON.parse(raw);
+    return typeof pkg.version === 'string' ? pkg.version : 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 export default async function adminRoutes(fastify: FastifyInstance) {
@@ -719,12 +731,69 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   // 6. 获取系统运行状态
   fastify.get('/system-stats', async () => {
+    const rootExists = fs.existsSync(config.filesRoot);
+    const dbExists = fs.existsSync(config.dbPath);
+    const frontendIndexPath = path.join(config.frontendDistPath, 'index.html');
+    const frontendIndexExists = fs.existsSync(frontendIndexPath);
+    const appVersion = await readAppVersion();
+    const sharedCount = (await FileMetaModel.findAllShared()).length;
+    const trashCount = (await TrashEntryModel.listAll()).length;
+    const activityStats = await FileMetaModel.getGlobalStats(7);
+    const recentActivity = activityStats.reduce((sum: number, item: any) => {
+      return sum + Number(item?.view_count ?? 0) + Number(item?.download_count ?? 0);
+    }, 0);
+    const dbSize = dbExists ? (await fs.promises.stat(config.dbPath)).size : 0;
+    const totalSystemMemory = os.totalmem();
+    const freeSystemMemory = os.freemem();
+    const cpuInfo = os.cpus();
+    const deploymentMode = process.env.pm_id != null
+      ? 'pm2'
+      : fs.existsSync('/.dockerenv')
+        ? 'docker'
+        : 'node';
+
     const stats = {
+      appVersion,
+      deploymentMode,
       rootPath: path.resolve(config.filesRoot),
+      dbPath: path.resolve(config.dbPath),
+      frontendDistPath: path.resolve(config.frontendDistPath),
+      frontendIndexExists,
+      dbExists,
+      dbSize,
+      rootExists,
       nodeVersion: process.version,
       platform: process.platform,
+      arch: process.arch,
+      hostname: os.hostname(),
+      pid: process.pid,
+      cwd: process.cwd(),
       uptime: process.uptime(),
+      osUptime: os.uptime(),
       memoryUsage: process.memoryUsage(),
+      systemMemory: {
+        total: totalSystemMemory,
+        free: freeSystemMemory,
+        used: totalSystemMemory - freeSystemMemory,
+      },
+      cpu: {
+        model: cpuInfo[0]?.model ?? 'Unknown CPU',
+        cores: cpuInfo.length,
+        loadavg: os.loadavg(),
+      },
+      counters: {
+        sharedCount,
+        trashCount,
+        recentActivity,
+        auditEventDays: 7,
+      },
+      runtime: {
+        env: process.env.NODE_ENV ?? 'development',
+        startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+        pm2Id: process.env.pm_id != null ? Number(process.env.pm_id) : null,
+        port: config.port,
+        caddyDomain: process.env.CADDY_DOMAIN ?? null,
+      },
     };
     return stats;
   });

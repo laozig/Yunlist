@@ -49,6 +49,56 @@ export interface AuditLogsResponse {
   hasMore: boolean;
 }
 
+export interface SystemStats {
+  appVersion: string;
+  deploymentMode: 'docker' | 'pm2' | 'node';
+  rootPath: string;
+  dbPath: string;
+  frontendDistPath: string;
+  frontendIndexExists: boolean;
+  dbExists: boolean;
+  dbSize: number;
+  rootExists: boolean;
+  nodeVersion: string;
+  platform: string;
+  arch: string;
+  hostname: string;
+  pid: number;
+  cwd: string;
+  uptime: number;
+  osUptime: number;
+  memoryUsage: {
+    rss: number;
+    heapTotal: number;
+    heapUsed: number;
+    external: number;
+    arrayBuffers: number;
+  };
+  systemMemory: {
+    total: number;
+    free: number;
+    used: number;
+  };
+  cpu: {
+    model: string;
+    cores: number;
+    loadavg: number[];
+  };
+  counters: {
+    sharedCount: number;
+    trashCount: number;
+    recentActivity: number;
+    auditEventDays: number;
+  };
+  runtime: {
+    env: string;
+    startedAt: string;
+    pm2Id: number | null;
+    port: number;
+    caddyDomain: string | null;
+  };
+}
+
 function buildHeaders(options: RequestInit = {}) {
   const token = localStorage.getItem('yunlist_token');
   const headers = new Headers(options.headers);
@@ -265,7 +315,7 @@ export const api = {
   },
 
   getSystemStats: () =>
-    request<any>('/api/admin/system-stats'),
+    request<SystemStats>('/api/admin/system-stats'),
 
   getStats: () =>
     request<{ dashboard: any[], hotFiles: any[] }>('/api/admin/stats'),
