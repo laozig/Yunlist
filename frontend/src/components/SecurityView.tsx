@@ -55,6 +55,8 @@ export function SecurityView() {
             <div className="relative">
               <input
                 type={showOld ? 'text' : 'password'}
+                name="currentPassword"
+                autoComplete="current-password"
                 value={oldPassword}
                 onChange={e => setOldPassword(e.target.value)}
                 required
@@ -71,6 +73,8 @@ export function SecurityView() {
             <div className="relative">
               <input
                 type={showNew ? 'text' : 'password'}
+                name="newPassword"
+                autoComplete="new-password"
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
                 required
@@ -86,6 +90,8 @@ export function SecurityView() {
             <label className="text-xs font-bold uppercase tracking-widest text-gray-400 ml-1">确认新密码</label>
             <input
               type="password"
+              name="confirmNewPassword"
+              autoComplete="new-password"
               value={confirmPassword}
               onChange={e => setConfirmPassword(e.target.value)}
               required

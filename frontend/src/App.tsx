@@ -97,6 +97,8 @@ function App() {
            {loginError && <p className="text-red-500 text-sm mb-4 bg-red-50 p-3 rounded-lg w-full text-center">{loginError}</p>}
            <input
              type="password"
+             name="loginPassword"
+             autoComplete="current-password"
              value={password}
              onChange={e => setPassword(e.target.value)}
              placeholder="输入管理员密码"

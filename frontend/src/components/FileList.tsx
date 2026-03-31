@@ -203,6 +203,8 @@ export function FileList({ files, currentPath, onFileClick, onDetailClick, selec
 
       if (failedFiles.length > 0) {
         alert(`以下文件上传失败：${failedFiles.join('、')}`);
+      } else {
+        setUploadTasks([]);
       }
     } finally {
       setIsUploading(false);
