@@ -282,6 +282,34 @@ docker compose logs -f app
 docker compose logs -f caddy
 ```
 
+### 13.2.1 Docker 构建时报 `npm ci` / lockfile 同步错误
+
+如果你看到类似错误：
+
+```text
+npm ci can only install packages when your package.json and package-lock.json are in sync
+```
+
+说明服务器上的构建阶段使用了严格锁文件检查，而当前依赖树与 lockfile 不完全一致。当前仓库的部署版本已经把 Docker 构建改成更稳妥的：
+
+```Dockerfile
+npm install --no-audit --no-fund
+```
+
+因此你只需要先拉取最新代码，再重新构建：
+
+```bash
+git pull
+docker compose up -d --build --force-recreate
+```
+
+如果你怀疑 Docker 缓存干扰，也可以执行：
+
+```bash
+docker compose build --no-cache
+docker compose up -d
+```
+
 ### 13.3 数据丢失
 
 确认是否正确使用了挂载目录：
