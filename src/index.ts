@@ -50,6 +50,13 @@ const frontendDistPath = config.frontendDistPath;
 const frontendIndexPath = path.join(frontendDistPath, 'index.html');
 
 if (fs.existsSync(frontendDistPath) && fs.existsSync(frontendIndexPath)) {
+  const sendFrontendIndex = (_request: any, reply: any) => {
+    return reply.type('text/html; charset=utf-8').send(fs.createReadStream(frontendIndexPath));
+  };
+
+  // 显式兜底根路径，避免 fastify-static 在根目录请求时返回 403
+  fastify.get('/', sendFrontendIndex);
+
   fastify.register(fastifyStatic, {
     root: frontendDistPath,
     prefix: '/',
@@ -61,7 +68,7 @@ if (fs.existsSync(frontendDistPath) && fs.existsSync(frontendIndexPath)) {
     const isApiRequest = requestUrl === '/api' || requestUrl.startsWith('/api/');
 
     if (request.method === 'GET' && !isApiRequest) {
-      return reply.type('text/html; charset=utf-8').send(fs.createReadStream(frontendIndexPath));
+      return sendFrontendIndex(request, reply);
     }
 
     return reply.code(404).send({ error: 'Not Found' });
