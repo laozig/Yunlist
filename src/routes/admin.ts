@@ -5,6 +5,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { pipeline } from 'stream/promises';
 import { getSecureFilePath, normalizeRelativePath } from '../utils/pathUtils';
+import { getDB } from '../db';
 import { FileMetaModel } from '../models/fileMeta';
 import { TrashEntryModel } from '../models/trashEntry';
 import { config } from '../config';
@@ -202,6 +203,130 @@ async function readAppVersion(): Promise<string> {
     return typeof pkg.version === 'string' ? pkg.version : 'unknown';
   } catch {
     return 'unknown';
+  }
+}
+
+function formatDateKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function buildActivityTrend(rawItems: any[], days: number) {
+  const trendMap = new Map<string, { view_count: number; download_count: number }>();
+
+  for (const item of rawItems) {
+    const date = typeof item?.date === 'string' ? item.date : '';
+    if (!date) continue;
+
+    trendMap.set(date, {
+      view_count: Number(item?.view_count ?? 0),
+      download_count: Number(item?.download_count ?? 0),
+    });
+  }
+
+  const points: Array<{ date: string; view_count: number; download_count: number; total: number }> = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const current = new Date(today);
+    current.setDate(today.getDate() - i);
+    const key = formatDateKey(current);
+    const matched = trendMap.get(key) ?? { view_count: 0, download_count: 0 };
+
+    points.push({
+      date: key,
+      view_count: matched.view_count,
+      download_count: matched.download_count,
+      total: matched.view_count + matched.download_count,
+    });
+  }
+
+  return points;
+}
+
+async function readDiskUsage(targetPath: string) {
+  try {
+    const fallbackTarget = fs.existsSync(targetPath) ? targetPath : path.dirname(targetPath);
+    const stat = await fs.promises.statfs(fallbackTarget);
+    const blockSize = Number((stat as any).bsize ?? (stat as any).frsize ?? 0);
+    const total = Number((stat as any).blocks ?? 0) * blockSize;
+    const free = Number((stat as any).bavail ?? (stat as any).bfree ?? 0) * blockSize;
+    const used = total > 0 ? Math.max(total - free, 0) : null;
+    const usagePercent = total > 0 && used != null ? Number(((used / total) * 100).toFixed(2)) : null;
+
+    return {
+      total: total || null,
+      free: free || null,
+      used,
+      usagePercent,
+      blockSize: blockSize || null,
+    };
+  } catch {
+    return {
+      total: null,
+      free: null,
+      used: null,
+      usagePercent: null,
+      blockSize: null,
+    };
+  }
+}
+
+async function readDbHealth(dbExists: boolean) {
+  if (!dbExists) {
+    return {
+      status: 'error',
+      label: '数据库缺失',
+      journalMode: null,
+      message: '未检测到数据库文件，请检查 DB_PATH 是否正确。',
+      updatedAt: null,
+    } as const;
+  }
+
+  const updatedAt = (await fs.promises.stat(config.dbPath)).mtime.toISOString();
+
+  try {
+    const db = getDB();
+    const quickCheckRow = await db.get('PRAGMA quick_check');
+    const journalModeRow = await db.get('PRAGMA journal_mode');
+    const quickCheck = typeof quickCheckRow?.quick_check === 'string' ? quickCheckRow.quick_check : 'unknown';
+    const journalMode = typeof journalModeRow?.journal_mode === 'string' ? journalModeRow.journal_mode : null;
+
+    if (quickCheck !== 'ok') {
+      return {
+        status: 'error',
+        label: '数据库异常',
+        journalMode,
+        message: `完整性检查未通过：${quickCheck}`,
+        updatedAt,
+      } as const;
+    }
+
+    if (journalMode && journalMode.toLowerCase() !== 'wal') {
+      return {
+        status: 'warning',
+        label: '数据库可用',
+        journalMode,
+        message: `数据库可读写，但当前 journal_mode 为 ${journalMode}，建议使用 WAL 模式。`,
+        updatedAt,
+      } as const;
+    }
+
+    return {
+      status: 'healthy',
+      label: '数据库健康',
+      journalMode,
+      message: '数据库读写正常，完整性检查通过。',
+      updatedAt,
+    } as const;
+  } catch (error: any) {
+    return {
+      status: 'error',
+      label: '数据库检测失败',
+      journalMode: null,
+      message: error?.message || '无法执行数据库健康检查。',
+      updatedAt,
+    } as const;
   }
 }
 
@@ -731,6 +856,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   // 6. 获取系统运行状态
   fastify.get('/system-stats', async () => {
+    const trendDays = 7;
     const rootExists = fs.existsSync(config.filesRoot);
     const dbExists = fs.existsSync(config.dbPath);
     const frontendIndexPath = path.join(config.frontendDistPath, 'index.html');
@@ -738,14 +864,17 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const appVersion = await readAppVersion();
     const sharedCount = (await FileMetaModel.findAllShared()).length;
     const trashCount = (await TrashEntryModel.listAll()).length;
-    const activityStats = await FileMetaModel.getGlobalStats(7);
-    const recentActivity = activityStats.reduce((sum: number, item: any) => {
+    const activityStats = await FileMetaModel.getGlobalStats(trendDays);
+    const activityTrend = buildActivityTrend(activityStats, trendDays);
+    const recentActivity = activityTrend.reduce((sum: number, item: any) => {
       return sum + Number(item?.view_count ?? 0) + Number(item?.download_count ?? 0);
     }, 0);
     const dbSize = dbExists ? (await fs.promises.stat(config.dbPath)).size : 0;
     const totalSystemMemory = os.totalmem();
     const freeSystemMemory = os.freemem();
     const cpuInfo = os.cpus();
+    const disk = await readDiskUsage(config.filesRoot);
+    const dbHealth = await readDbHealth(dbExists);
     const deploymentMode = process.env.pm_id != null
       ? 'pm2'
       : fs.existsSync('/.dockerenv')
@@ -785,8 +914,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         sharedCount,
         trashCount,
         recentActivity,
-        auditEventDays: 7,
+        auditEventDays: trendDays,
       },
+      disk,
+      activityTrend,
+      dbHealth,
       runtime: {
         env: process.env.NODE_ENV ?? 'development',
         startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),

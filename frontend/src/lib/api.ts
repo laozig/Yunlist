@@ -90,6 +90,26 @@ export interface SystemStats {
     recentActivity: number;
     auditEventDays: number;
   };
+  disk: {
+    total: number | null;
+    free: number | null;
+    used: number | null;
+    usagePercent: number | null;
+    blockSize: number | null;
+  };
+  activityTrend: Array<{
+    date: string;
+    view_count: number;
+    download_count: number;
+    total: number;
+  }>;
+  dbHealth: {
+    status: 'healthy' | 'warning' | 'error';
+    label: string;
+    journalMode: string | null;
+    message: string;
+    updatedAt: string | null;
+  };
   runtime: {
     env: string;
     startedAt: string;

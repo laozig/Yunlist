@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
 import { api, type SystemStats } from '../lib/api';
 import {
   Activity,
@@ -38,6 +39,31 @@ function formatDuration(seconds: number) {
   if (days > 0) return `${days} 天 ${hours} 小时`;
   if (hours > 0) return `${hours} 小时 ${minutes} 分钟`;
   return `${minutes} 分钟`;
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '未知';
+  return `${value.toFixed(value >= 10 ? 0 : 1)}%`;
+}
+
+function getDbHealthMeta(status: SystemStats['dbHealth']['status']) {
+  switch (status) {
+    case 'healthy':
+      return {
+        badge: 'bg-emerald-50 text-emerald-600 border-emerald-100',
+        dot: 'bg-emerald-500',
+      };
+    case 'warning':
+      return {
+        badge: 'bg-amber-50 text-amber-700 border-amber-100',
+        dot: 'bg-amber-500',
+      };
+    default:
+      return {
+        badge: 'bg-rose-50 text-rose-600 border-rose-100',
+        dot: 'bg-rose-500',
+      };
+  }
 }
 
 function getModeMeta(mode: SystemStats['deploymentMode']) {
@@ -104,15 +130,28 @@ export function SettingsView() {
   const rootStatusTone = stats.rootExists ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50';
   const dbStatusTone = stats.dbExists ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50';
   const distStatusTone = stats.frontendIndexExists ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50';
+  const dbHealthMeta = getDbHealthMeta(stats.dbHealth.status);
+  const diskUsagePercent = stats.disk.usagePercent ?? 0;
 
   return (
-    <div className="flex-1 p-8 max-w-6xl overflow-y-auto">
+    <div className="flex-1 overflow-y-auto">
+      <div className="mx-auto w-full max-w-[1480px] px-8 py-8">
       <div className="mb-8 flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
         <div>
           <h2 className="text-3xl font-black text-gray-800 tracking-tight">系统设置</h2>
           <p className="text-sm text-gray-500 mt-2 max-w-2xl leading-relaxed">
             把这台 Yunlist 实例的运行状态、部署方式、路径配置与业务概况集中展示出来，方便你一眼判断它是不是健康、是不是跑在正确模式下。
           </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold ${modeMeta.tone}`}>
+              <span className="w-2 h-2 rounded-full bg-current opacity-70" />
+              当前部署：{modeMeta.label}
+            </div>
+            <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold ${dbHealthMeta.badge}`}>
+              <span className={`w-2 h-2 rounded-full ${dbHealthMeta.dot}`} />
+              {stats.dbHealth.label}
+            </div>
+          </div>
         </div>
 
         <button
@@ -125,7 +164,7 @@ export function SettingsView() {
         </button>
       </div>
 
-      <div className="mb-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="mb-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
         <div className="rounded-3xl bg-gradient-to-br from-slate-900 via-indigo-900 to-indigo-700 text-white p-6 shadow-xl shadow-indigo-200/40">
           <div className="flex items-center gap-3 text-indigo-200 mb-6">
             <ShieldCheck className="w-5 h-5" />
@@ -172,8 +211,8 @@ export function SettingsView() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <div className="bg-white/85 backdrop-blur-sm border border-white/60 p-6 rounded-3xl shadow-sm space-y-5">
+      <div className="grid grid-cols-1 2xl:grid-cols-12 gap-6 items-start">
+        <div className="bg-white/85 backdrop-blur-sm border border-white/60 p-6 rounded-3xl shadow-sm space-y-5 2xl:col-span-4">
           <div className="flex items-center gap-3 text-indigo-500 mb-1">
             <Server className="w-6 h-6" />
             <h3 className="font-bold text-gray-800 text-lg">运行环境</h3>
@@ -206,7 +245,7 @@ export function SettingsView() {
           </div>
         </div>
 
-        <div className="bg-white/85 backdrop-blur-sm border border-white/60 p-6 rounded-3xl shadow-sm space-y-5">
+        <div className="bg-white/85 backdrop-blur-sm border border-white/60 p-6 rounded-3xl shadow-sm space-y-5 2xl:col-span-4">
           <div className="flex items-center gap-3 text-indigo-500 mb-1">
             <HardDrive className="w-6 h-6" />
             <h3 className="font-bold text-gray-800 text-lg">存储与路径</h3>
@@ -239,7 +278,7 @@ export function SettingsView() {
           </div>
         </div>
 
-        <div className="bg-white/85 backdrop-blur-sm border border-white/60 p-6 rounded-3xl shadow-sm space-y-6">
+        <div className="bg-white/85 backdrop-blur-sm border border-white/60 p-6 rounded-3xl shadow-sm space-y-6 2xl:col-span-4">
           <div className="flex items-center gap-3 text-indigo-500">
             <Cpu className="w-6 h-6" />
             <h3 className="font-bold text-gray-800 text-lg">资源监控</h3>
@@ -256,6 +295,12 @@ export function SettingsView() {
               <div className="text-xs uppercase tracking-[0.2em] font-bold text-gray-400 mb-2">数据库体积</div>
               <div className="text-2xl font-black text-gray-800">{formatBytes(stats.dbSize)}</div>
               <div className="text-xs text-gray-500 mt-2">当前 SQLite 文件大小</div>
+            </div>
+
+            <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+              <div className="text-xs uppercase tracking-[0.2em] font-bold text-gray-400 mb-2">磁盘占用</div>
+              <div className="text-2xl font-black text-gray-800">{formatPercent(stats.disk.usagePercent)}</div>
+              <div className="text-xs text-gray-500 mt-2">{stats.disk.used != null && stats.disk.total != null ? `${formatBytes(stats.disk.used)} / ${formatBytes(stats.disk.total)}` : '当前环境暂未提供磁盘统计'}</div>
             </div>
 
             <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
@@ -295,9 +340,19 @@ export function SettingsView() {
               <div className="font-black text-lg text-gray-800">{stats.cpu.loadavg.map((item) => item.toFixed(2)).join(' / ')}</div>
             </div>
           </div>
+
+          <div>
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span className="font-semibold text-gray-600">磁盘空间</span>
+              <span className="font-mono text-gray-500">{stats.disk.used != null && stats.disk.total != null ? `${formatBytes(stats.disk.used)} / ${formatBytes(stats.disk.total)}` : '未知'}</span>
+            </div>
+            <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-violet-500 to-purple-500 rounded-full" style={{ width: `${diskUsagePercent}%` }} />
+            </div>
+          </div>
         </div>
 
-        <div className="bg-white/85 backdrop-blur-sm border border-white/60 p-6 rounded-3xl shadow-sm space-y-5">
+        <div className="bg-white/85 backdrop-blur-sm border border-white/60 p-6 rounded-3xl shadow-sm space-y-5 2xl:col-span-12">
           <div className="flex items-center gap-3 text-indigo-500">
             <Zap className="w-6 h-6" />
             <h3 className="font-bold text-gray-800 text-lg">控制台摘要</h3>
@@ -326,8 +381,13 @@ export function SettingsView() {
               <div className="flex items-center gap-2 text-gray-500 text-xs uppercase tracking-[0.2em] font-bold mb-2">
                 <Database className="w-4 h-4" /> 数据状态
               </div>
-              <div className="text-lg font-black text-gray-800">{stats.dbExists ? '数据库在线' : '数据库缺失'}</div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className={`w-2.5 h-2.5 rounded-full ${dbHealthMeta.dot}`} />
+                <div className="text-lg font-black text-gray-800">{stats.dbHealth.label}</div>
+              </div>
               <div className="text-xs text-gray-500 mt-2">当前路径：{stats.dbPath}</div>
+              <div className="text-xs mt-2 text-gray-500">{stats.dbHealth.message}</div>
+              <div className="text-[11px] mt-2 text-gray-400">Journal Mode：{stats.dbHealth.journalMode || '未知'}{stats.dbHealth.updatedAt ? ` · 最近修改 ${formatDistanceToNow(new Date(stats.dbHealth.updatedAt), { addSuffix: true })}` : ''}</div>
             </div>
 
             <div className="rounded-2xl bg-gray-50 border border-gray-100 p-4">
@@ -339,6 +399,36 @@ export function SettingsView() {
             </div>
           </div>
 
+          <div className="rounded-2xl bg-white border border-gray-100 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <div className="text-xs uppercase tracking-[0.2em] font-bold text-gray-400">最近访问趋势</div>
+                <div className="text-sm font-semibold text-gray-700 mt-1">近 {stats.counters.auditEventDays} 天访问 / 下载迷你图</div>
+              </div>
+              <div className="text-xs text-gray-400 font-mono">总计 {stats.counters.recentActivity}</div>
+            </div>
+
+            <div className="h-44 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={stats.activityTrend}>
+                  <defs>
+                    <linearGradient id="settingsViewTrend" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={(value: string) => value.slice(5)} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                    labelFormatter={(label) => `日期：${label}`}
+                  />
+                  <Area type="monotone" name="总事件" dataKey="total" stroke="#6366f1" strokeWidth={3} fill="url(#settingsViewTrend)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
           <div className="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/70 p-5">
             <div className="flex items-center gap-2 text-indigo-600 font-bold mb-3">
               <FolderOpen className="w-4 h-4" /> 建议关注
@@ -347,10 +437,12 @@ export function SettingsView() {
               <li>• 如果数据库状态显示“未检测到”，请检查 `DB_PATH` 是否正确且宿主机目录已挂载。</li>
               <li>• 如果前端打包目录缺少 `index.html`，生产环境首页会无法正常渲染。</li>
               <li>• 若你是 PM2 原生部署，建议同时确认 `CADDY_DOMAIN` 与 `CADDY_EMAIL` 已配置。</li>
+              <li>• 当磁盘占用接近上限时，优先清理大文件、回收站与旧日志，避免上传失败。</li>
               <li>• 当近期活动突然激增时，优先去“访问审计”里核查来源与行为模式。</li>
             </ul>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );
