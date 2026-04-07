@@ -8,7 +8,11 @@ import { initDB } from './db';
 import adminRoutes from './routes/admin';
 import shareRoutes from './routes/share';
 
-const fastify = Fastify({ logger: true });
+const fastify = Fastify({
+  logger: true,
+  // 部署在 Caddy / Nginx 等反向代理后时，信任转发头，确保 request.ip 能拿到真实访客 IP
+  trustProxy: true,
+});
 
 // 注册 JWT 插件用于轻量级鉴权
 fastify.register(fastifyJwt, {
